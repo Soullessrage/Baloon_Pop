@@ -12,6 +12,10 @@ import tkinter as tk
 PASTEL_BALLOON_COLORS = ("#f28fad", "#82c9e8", "#a8dba8", "#f5d76e", "#c5a3e8", "#f3ad7b")
 PLAYER_SPEED = 285
 SHOT_INTERVAL = 0.22
+REGULAR_SPAWN_START = 1.5
+REGULAR_SPAWN_MIN = 0.72
+REGULAR_SPAWN_RAMP = 0.006
+GAME_VERSION = "VER. 0.2"
 
 
 @dataclass
@@ -24,6 +28,7 @@ class Balloon:
     speed: float
     drift: float
     color: str
+    indestructible: bool = False
 
 
 @dataclass
@@ -34,6 +39,18 @@ class Projectile:
     y: float
     velocity_x: float
     velocity_y: float
+
+
+@dataclass
+class BossBalloon:
+    """The hovering boss and its three rotating balloon shields."""
+
+    x: float
+    y: float
+    radius: float
+    health: int
+    shield_angles: list[float | None]
+    hazard_spawn_in: float
 
 
 class PlaneGame:
@@ -49,6 +66,10 @@ class PlaneGame:
         self._last_frame = 0.0
         self._last_shot = 0.0
         self._spawn_in = 0.0
+        self._elapsed = 0.0
+        self._boss: BossBalloon | None = None
+        self._boss_defeated = False
+        self.movement_scheme = "wasd"
         self._cloud_offset = 0.0
         self._width = 1
         self._height = 1
@@ -63,6 +84,9 @@ class PlaneGame:
         self.plane_y = self.canvas.winfo_height() * 0.5
         self.balloons: list[Balloon] = []
         self.projectiles: list[Projectile] = []
+        self._elapsed = 0.0
+        self._boss = None
+        self._boss_defeated = False
         self._held_keys.clear()
         self._spawn_in = 0.45
         self._last_shot = 0.0
@@ -79,7 +103,9 @@ class PlaneGame:
 
     def handle_keypress(self, key):
         """Handle a key press; return whether the game consumed it."""
-        normalized = key.lower()
+        normalized = self._normalize_key(key)
+        if normalized is None:
+            return False
         if normalized == "escape":
             self.handle_escape()
             return True
@@ -92,9 +118,26 @@ class PlaneGame:
 
     def handle_keyrelease(self, key):
         """Stop continuous movement or shooting when the key is released."""
-        normalized = key.lower()
+        normalized = self._normalize_key(key)
+        if normalized is None:
+            return False
         self._held_keys.discard(normalized)
         return normalized in {"w", "a", "s", "d", "space"}
+
+    def set_movement_scheme(self, scheme):
+        """Set the active physical keys used for plane movement."""
+        if scheme not in {"wasd", "arrows"}:
+            raise ValueError("Movement scheme must be 'wasd' or 'arrows'.")
+        self.movement_scheme = scheme
+        self._held_keys.clear()
+
+    def _normalize_key(self, key):
+        normalized = key.lower()
+        if normalized in {"escape", "space"}:
+            return normalized
+        if self.movement_scheme == "arrows":
+            return {"up": "w", "left": "a", "down": "s", "right": "d"}.get(normalized)
+        return normalized if normalized in {"w", "a", "s", "d"} else None
 
     def handle_escape(self):
         """Pause the game when Escape is pressed during play."""
@@ -145,6 +188,7 @@ class PlaneGame:
     def _step(self, delta):
         self._width = max(self.canvas.winfo_width(), 1)
         self._height = max(self.canvas.winfo_height(), 1)
+        self._elapsed += delta
         self._cloud_offset += 38 * delta
 
         horizontal = int("d" in self._held_keys) - int("a" in self._held_keys)
@@ -164,7 +208,13 @@ class PlaneGame:
         self._spawn_in -= delta
         if self._spawn_in <= 0:
             self._spawn_balloon()
-            self._spawn_in = random.uniform(0.9, 1.55)
+            spawn_interval = max(REGULAR_SPAWN_MIN, REGULAR_SPAWN_START - self._elapsed * REGULAR_SPAWN_RAMP)
+            self._spawn_in = random.uniform(spawn_interval * 0.9, spawn_interval * 1.1)
+
+        if self.score >= 150 and self._boss is None and not self._boss_defeated:
+            self._spawn_boss()
+        if self._boss is not None:
+            self._update_boss(delta)
 
         for projectile in self.projectiles:
             projectile.x += projectile.velocity_x * delta
@@ -179,7 +229,7 @@ class PlaneGame:
         for balloon in self.balloons:
             balloon.x -= balloon.speed * delta
             balloon.y = max(56, min(self._height - 44, balloon.y + balloon.drift * delta))
-            if balloon.x + balloon.radius < 0:
+            if balloon.x + balloon.radius < 0 and not balloon.indestructible:
                 missed.append(balloon)
                 self._lose_life()
                 if self.state == "game_over":
@@ -201,13 +251,103 @@ class PlaneGame:
         if self.state != "playing":
             return
 
+        if self._boss is not None:
+            if math.hypot(self._boss.x - self.plane_x, self._boss.y - self.plane_y) < self._boss.radius + 14:
+                self._lose_life()
+            elif any(
+                math.hypot(shield_x - self.plane_x, shield_y - self.plane_y) < 29
+                for _index, shield_x, shield_y in self._boss_shield_positions()
+            ):
+                self._lose_life()
+
+        if self.state != "playing":
+            return
+
         for projectile in tuple(self.projectiles):
+            hit_balloon = None
             for balloon in tuple(self.balloons):
-                if math.hypot(balloon.x - projectile.x, balloon.y - projectile.y) <= balloon.radius + 4:
-                    self.balloons.remove(balloon)
+                if not balloon.indestructible and math.hypot(
+                    balloon.x - projectile.x, balloon.y - projectile.y
+                ) <= balloon.radius + 4:
+                    hit_balloon = balloon
+                    break
+            if hit_balloon is not None:
+                self.balloons.remove(hit_balloon)
+                self.projectiles.remove(projectile)
+                self.score += 1
+                continue
+
+            if self._boss is None:
+                continue
+            hit_shield = False
+            for index, shield_x, shield_y in self._boss_shield_positions():
+                if math.hypot(shield_x - projectile.x, shield_y - projectile.y) <= 18:
+                    self._boss.shield_angles[index] = None
                     self.projectiles.remove(projectile)
                     self.score += 1
+                    hit_shield = True
                     break
+            if hit_shield:
+                continue
+
+            shields_active = any(angle is not None for angle in self._boss.shield_angles)
+            if not shields_active and math.hypot(self._boss.x - projectile.x, self._boss.y - projectile.y) <= self._boss.radius:
+                self._boss.health -= 1
+                self.projectiles.remove(projectile)
+                if self._boss.health <= 0:
+                    self._boss = None
+                    self._boss_defeated = True
+                    self.score += 1
+
+    def _spawn_boss(self):
+        self._boss = BossBalloon(
+            x=self._width * 0.74,
+            y=self._height * 0.5,
+            radius=58,
+            health=5,
+            shield_angles=[0.0, math.tau / 3, math.tau * 2 / 3],
+            hazard_spawn_in=0.7,
+        )
+
+    def _update_boss(self, delta):
+        boss = self._boss
+        if boss is None:
+            return
+        bob_range = min(110, self._height * 0.22)
+        boss.y = max(
+            boss.radius + 88,
+            min(self._height - boss.radius - 36, self._height * 0.5 + math.sin(self._elapsed * 1.2) * bob_range),
+        )
+        for index, angle in enumerate(boss.shield_angles):
+            if angle is not None:
+                boss.shield_angles[index] = (angle + delta * 1.15) % math.tau
+        boss.hazard_spawn_in -= delta
+        if boss.hazard_spawn_in <= 0:
+            self._spawn_boss_hazard()
+            boss.hazard_spawn_in = random.uniform(0.62, 0.78)
+
+    def _spawn_boss_hazard(self):
+        self.balloons.append(
+            Balloon(
+                x=self._width + 24,
+                y=random.uniform(82, max(83, self._height - 58)),
+                radius=random.uniform(16, 21),
+                speed=random.uniform(180, 215),
+                drift=random.uniform(-12, 12),
+                color="#a9b8c9",
+                indestructible=True,
+            )
+        )
+
+    def _boss_shield_positions(self):
+        if self._boss is None:
+            return []
+        orbit_radius = self._boss.radius + 26
+        positions = []
+        for index, angle in enumerate(self._boss.shield_angles):
+            if angle is not None:
+                positions.append((index, self._boss.x + math.cos(angle) * orbit_radius, self._boss.y + math.sin(angle) * orbit_radius))
+        return positions
 
     def _fire(self):
         self.projectiles.append(
@@ -247,6 +387,8 @@ class PlaneGame:
         self._draw_hud()
         for balloon in self.balloons:
             self._draw_balloon(balloon)
+        if self._boss is not None:
+            self._draw_boss()
         for projectile in self.projectiles:
             self.canvas.create_rectangle(
                 projectile.x - 4,
@@ -314,11 +456,53 @@ class PlaneGame:
             font=("Courier New", 13, "bold"),
         )
         self.canvas.create_text(
-            self._width / 2,
-            24,
-            text="WASD  FLY     SPACE  FIRE     ESC  PAUSE",
-            fill="#637c91",
-            font=("Courier New", 9, "bold"),
+            self._width - 14,
+            self._height - 14,
+            anchor="se",
+            text=GAME_VERSION,
+            fill="#607386",
+            font=("Courier New", 8),
+        )
+
+    def _draw_boss(self):
+        boss = self._boss
+        if boss is None:
+            return
+        orbit_radius = boss.radius + 26
+        self.canvas.create_oval(
+            boss.x - orbit_radius,
+            boss.y - orbit_radius,
+            boss.x + orbit_radius,
+            boss.y + orbit_radius,
+            outline="#ffffff",
+            dash=(4, 5),
+            width=2,
+        )
+        boss_balloon = Balloon(boss.x, boss.y, boss.radius, 0, 0, "#c2a5e8")
+        self._draw_balloon(boss_balloon)
+        self.canvas.create_text(boss.x, boss.y, text="BOSS", fill="#ffffff", font=("Courier New", 12, "bold"))
+        for index, shield_x, shield_y in self._boss_shield_positions():
+            shield = Balloon(shield_x, shield_y, 15, 0, 0, PASTEL_BALLOON_COLORS[index])
+            self._draw_balloon(shield)
+
+        bar_width = 126
+        bar_left = boss.x - bar_width / 2
+        bar_top = max(60, boss.y - boss.radius - 35)
+        self.canvas.create_text(
+            boss.x,
+            bar_top - 11,
+            text=f"BOSS  {boss.health}/5     SHIELDS  {sum(angle is not None for angle in boss.shield_angles)}/3",
+            fill="#354356",
+            font=("Courier New", 8, "bold"),
+        )
+        self.canvas.create_rectangle(bar_left, bar_top, bar_left + bar_width, bar_top + 7, fill="#e3d7f2", outline="")
+        self.canvas.create_rectangle(
+            bar_left,
+            bar_top,
+            bar_left + bar_width * boss.health / 5,
+            bar_top + 7,
+            fill="#a67dc9",
+            outline="",
         )
 
     def _draw_balloon(self, balloon):
@@ -340,6 +524,8 @@ class PlaneGame:
             fill="#fff9f7",
             outline="",
         )
+        if balloon.indestructible:
+            self.canvas.create_text(x, y, text="X", fill="#ffffff", font=("Courier New", 11, "bold"))
 
     def _draw_plane(self):
         x, y = self.plane_x, self.plane_y

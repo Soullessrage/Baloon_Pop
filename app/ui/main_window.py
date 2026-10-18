@@ -14,6 +14,7 @@ from pathlib import Path
 from game.plane_game import PlaneGame
 from services.updater import GitHubUpdater
 from ui.contact_window import ContactWindow
+from ui.controls_window import ControlsWindow
 from ui.settings_window import SettingsWindow
 
 
@@ -99,19 +100,20 @@ class MainWindow:
         button_width = min(390, width - 56)
         button_height = 46
         button_gap = 10
-        menu_height = button_height * 5 + button_gap * 4 + 20
-        first_y = max(height * 0.31, (height - menu_height) / 2 + 26)
         labels = [
             ("PLAY", "#d1edda", "#b8e3c8", self._play),
             ("SETTINGS", "#d4e8fa", "#bddcf5", self._open_settings),
+            ("CONTROLS", "#e4d8f5", "#d1c0ed", self._open_controls),
             ("CONTACT ME", "#f6d9e8", "#efc2d8", self._open_contact),
             ("BUY ME A COFFEE", "#f7edbe", "#f0e39e", self._buy_coffee),
-            ("UPDATE APP", "#f5c99b", "#efa96d", self._update_app),
+            ("UPDATE", "#f5c99b", "#efa96d", self._update_app),
         ]
+        menu_height = button_height * len(labels) + button_gap * (len(labels) - 1) + 20
+        first_y = max(height * 0.31, (height - menu_height) / 2 + 26)
 
         for index, (label, color, hover_color, callback) in enumerate(labels):
             y = first_y + index * (button_height + button_gap)
-            if index == 4:
+            if label == "UPDATE":
                 separator_y = y - 10
                 self.canvas.create_line(
                     center_x - button_width / 2,
@@ -130,7 +132,7 @@ class MainWindow:
         if self._update_running:
             self.canvas.create_text(
                 center_x,
-                min(height - 20, first_y + menu_height + 9),
+                min(height - 40, first_y + menu_height + 9),
                 text=self._update_status or "UPDATING REPOSITORY...",
                 fill="#5a6877",
                 font=("Courier New", 9, "bold"),
@@ -213,6 +215,9 @@ class MainWindow:
 
     def _open_settings(self):
         SettingsWindow(self.root)
+
+    def _open_controls(self):
+        ControlsWindow(self.root, self._game.movement_scheme, self._game.set_movement_scheme)
 
     def _open_contact(self):
         ContactWindow(self.root)

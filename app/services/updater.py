@@ -26,6 +26,7 @@ UPDATABLE_FILES = {
     PurePosixPath("app/main.py"),
     PurePosixPath("app/game/plane_game.py"),
     PurePosixPath("app/ui/main_window.py"),
+    PurePosixPath("app/ui/controls_window.py"),
     PurePosixPath("app/ui/settings_window.py"),
     PurePosixPath("app/ui/contact_window.py"),
     PurePosixPath("app/services/updater.py"),

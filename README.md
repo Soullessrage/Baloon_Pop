@@ -26,6 +26,12 @@ plane costs one of your three lives. Press **Escape** to pause. Continue resumes
 the flight; Exit returns to the main menu. After game over, Continue starts a
 fresh game and Exit returns to the menu.
 
+Balloon spawns become more frequent over time. At 150 popped balloons a boss
+appears with three rotating balloon shields. Pop all three to expose its core;
+hit the core five times to defeat it. During the boss fight, dodge the faster
+indestructible balloons they release. They do not add to your score. Open
+**Controls** on the main menu to switch movement between WASD and the arrow keys.
+
 ## Configure
 
 - Replace `EMAIL` and `WEBSITE_URL` in `app/ui/contact_window.py` with your
@@ -47,6 +53,7 @@ app/
 		plane_game.py
 	ui/
 		main_window.py
+		controls_window.py
 		settings_window.py
 		contact_window.py
 	services/
