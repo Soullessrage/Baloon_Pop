@@ -136,6 +136,14 @@ class MainWindow:
                 font=("Courier New", 9, "bold"),
             )
 
+        self.canvas.create_text(
+            center_x,
+            height - 18,
+            text="Author: Soullessrage - Made with AI as a proof of concept",
+            fill="#607386",
+            font=("Courier New", 8),
+        )
+
     def _draw_button(self, center_x, top, width, height, label, color, tag):
         left = center_x - width / 2
         right = center_x + width / 2

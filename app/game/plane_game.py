@@ -28,7 +28,7 @@ class Balloon:
 
 @dataclass
 class Projectile:
-    """A small pixel shot travelling in the plane's facing direction."""
+    """A small pixel shot travelling rightward across the screen."""
 
     x: float
     y: float
@@ -61,7 +61,6 @@ class PlaneGame:
         self.lives = 3
         self.plane_x = max(60, self.canvas.winfo_width() * 0.14)
         self.plane_y = self.canvas.winfo_height() * 0.5
-        self.facing = (1, 0)
         self.balloons: list[Balloon] = []
         self.projectiles: list[Projectile] = []
         self._held_keys.clear()
@@ -88,9 +87,6 @@ class PlaneGame:
             return normalized in {"w", "a", "s", "d", "space"}
         if normalized in {"w", "a", "s", "d", "space"}:
             self._held_keys.add(normalized)
-            direction = {"w": (0, -1), "a": (-1, 0), "s": (0, 1), "d": (1, 0)}.get(normalized)
-            if direction:
-                self.facing = direction
             return True
         return False
 
@@ -347,7 +343,6 @@ class PlaneGame:
 
     def _draw_plane(self):
         x, y = self.plane_x, self.plane_y
-        facing_x, facing_y = self.facing
         body = "#55a9d8"
         wing = "#397da9"
         cockpit = "#fff0a8"
@@ -362,18 +357,11 @@ class PlaneGame:
                 outline=outline,
             )
 
-        if facing_x:
-            block(x, y, 28, 10, body, "#ffffff")
-            block(x, y, 12, 26, wing)
-            block(x + facing_x * 17, y, 8, 6, body)
-            block(x + facing_x * 5, y, 7, 6, cockpit)
-            block(x - facing_x * 13, y, 6, 14, wing)
-        else:
-            block(x, y, 10, 28, body, "#ffffff")
-            block(x, y, 26, 12, wing)
-            block(x, y + facing_y * 17, 6, 8, body)
-            block(x, y + facing_y * 5, 6, 7, cockpit)
-            block(x, y - facing_y * 13, 14, 6, wing)
+        block(x, y, 28, 10, body, "#ffffff")
+        block(x, y, 12, 26, wing)
+        block(x + 17, y, 8, 6, body)
+        block(x + 5, y, 7, 6, cockpit)
+        block(x - 13, y, 6, 14, wing)
 
     def _draw_overlay(self, title, subtitle, primary_label, primary_action):
         self.canvas.create_rectangle(
