@@ -31,6 +31,10 @@ appears with three rotating balloon shields. Pop all three to expose its core;
 hit the core five times to defeat it. During the boss fight, dodge the faster
 indestructible balloons they release. They do not add to your score. Open
 **Controls** on the main menu to switch movement between WASD and the arrow keys.
+Regular balloons and the difficulty ramp pause during the boss fight, then
+resume after it is defeated. Click the book icon at the lower-right of the main
+menu to browse balloon types, power-ups, and lifetime statistics. The timed
+power-up system and catalog are ready for future drops; no pickups spawn yet.
 
 ## Configure
 
@@ -59,6 +63,10 @@ app/
 	services/
 		updater.py
 ```
+
+Power-up timers, the reference book, and persistent stats are kept in the
+already-updatable game and main-window modules so existing app copies can
+receive this release without a separate bootstrap step.
 
 The app uses only Python standard-library modules; there is no `pip install`
 step or dependency list to maintain.

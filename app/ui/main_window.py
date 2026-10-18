@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import queue
+import json
+import os
 import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import webbrowser
 from pathlib import Path
 
-from game.plane_game import PlaneGame
+from game.plane_game import PASTEL_BALLOON_COLORS, POWER_UP_CATALOG, PlaneGame
 from services.updater import GitHubUpdater
 from ui.contact_window import ContactWindow
 from ui.controls_window import ControlsWindow
@@ -52,7 +54,14 @@ class MainWindow:
         self._update_running = False
         self._update_status = ""
         self._screen = "menu"
-        self._game = PlaneGame(self.root, self.canvas, self._return_to_menu)
+        self._stats = StatsStore()
+        self._game = PlaneGame(
+            self.root,
+            self.canvas,
+            self._return_to_menu,
+            self._stats.record_balloon_popped,
+            self._stats.record_boss_defeated,
+        )
 
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.root.bind("<KeyPress>", self._on_key_press)
@@ -146,6 +155,49 @@ class MainWindow:
             font=("Courier New", 8),
         )
 
+        book_tag = "main-menu-book"
+        book_left = width - 62
+        book_top = height - 56
+        book_bottom = height - 20
+        self.canvas.create_polygon(
+            book_left,
+            book_top + 3,
+            book_left + 15,
+            book_top + 7,
+            book_left + 15,
+            book_bottom,
+            book_left,
+            book_bottom - 4,
+            fill="#d7b5e8",
+            outline="#ffffff",
+            width=2,
+            tags=(book_tag,),
+        )
+        self.canvas.create_polygon(
+            book_left + 17,
+            book_top + 7,
+            book_left + 32,
+            book_top + 3,
+            book_left + 32,
+            book_bottom - 4,
+            book_left + 17,
+            book_bottom,
+            fill="#f3e6b0",
+            outline="#ffffff",
+            width=2,
+            tags=(book_tag,),
+        )
+        self.canvas.create_line(
+            book_left + 16,
+            book_top + 7,
+            book_left + 16,
+            book_bottom,
+            fill="#71808c",
+            width=2,
+            tags=(book_tag,),
+        )
+        self.canvas.tag_bind(book_tag, "<Button-1>", lambda _event: self._open_book())
+
     def _draw_button(self, center_x, top, width, height, label, color, tag):
         left = center_x - width / 2
         right = center_x + width / 2
@@ -219,6 +271,9 @@ class MainWindow:
     def _open_controls(self):
         ControlsWindow(self.root, self._game.movement_scheme, self._game.set_movement_scheme)
 
+    def _open_book(self):
+        BookWindow(self.root, self._stats)
+
     def _open_contact(self):
         ContactWindow(self.root)
 
@@ -263,10 +318,7 @@ class MainWindow:
                 else:
                     messagebox.showerror("Update failed", message, parent=self.root)
         try:
-            try:
-                self.root.after(100, self._poll_update_result)
-            except tk.TclError:
-                pass
+            self.root.after(100, self._poll_update_result)
         except tk.TclError:
             pass
 
@@ -282,3 +334,126 @@ class MainWindow:
             )
             return
         self.root.destroy()
+
+
+def _default_stats_path() -> Path:
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return base / "BalloonPop" / "stats.json"
+
+
+class StatsStore:
+    """Keep lifetime pop and boss counts outside the app install folder."""
+
+    def __init__(self, path: Path | None = None):
+        self.path = Path(path) if path is not None else _default_stats_path()
+        self._stats = {"balloons_popped": 0, "bosses_defeated": 0}
+        self._load()
+
+    def record_balloon_popped(self) -> None:
+        self._stats["balloons_popped"] += 1
+        self._save()
+
+    def record_boss_defeated(self) -> None:
+        self._stats["bosses_defeated"] += 1
+        self._save()
+
+    def snapshot(self) -> dict[str, int]:
+        return dict(self._stats)
+
+    def _load(self) -> None:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(data, dict):
+            return
+        for key in self._stats:
+            value = data.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                self._stats[key] = value
+
+    def _save(self) -> None:
+        temporary_path = self.path.with_suffix(".tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path.write_text(json.dumps(self._stats, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary_path, self.path)
+        except OSError:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+class BookWindow:
+    """Show balloon types, planned power-ups, and lifetime statistics."""
+
+    def __init__(self, parent, stats_store):
+        self.window = tk.Toplevel(parent)
+        self.window.title("Balloon Pop Book")
+        self.window.geometry("620x440")
+        self.window.minsize(520, 360)
+        self.window.configure(bg="#e4edf5")
+        self.window.transient(parent)
+        self.window.grab_set()
+
+        ttk.Label(self.window, text="BALLOON POP BOOK", font=("Courier New", 15, "bold")).pack(pady=(16, 10))
+        notebook = ttk.Notebook(self.window)
+        notebook.pack(fill="both", expand=True, padx=18, pady=(0, 16))
+        self._build_balloon_tab(notebook)
+        self._build_power_up_tab(notebook)
+        self._build_stats_tab(notebook, stats_store)
+
+    def _build_balloon_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=14)
+        notebook.add(tab, text="Balloons")
+        row = 0
+        for index, color in enumerate(PASTEL_BALLOON_COLORS, start=1):
+            row = self._add_guide_row(tab, row, color, f"Pastel balloon {index}", "Pop for one point; a miss costs one life.")
+        row = self._add_guide_row(tab, row, "#a8dba8", "Boss balloon", "Turns grey while shields remain, then green, yellow, and red as health falls.")
+        row = self._add_guide_row(tab, row, "#c5a3e8", "Orbiting shield balloon", "Three orbit the boss. Pop all three before damaging its core.")
+        self._add_guide_row(tab, row, "#a9b8c9", "Indestructible hazard", "Released during the boss fight. Dodge it; it gives no points.")
+
+    def _build_power_up_tab(self, notebook):
+        tab = ttk.Frame(notebook, padding=14)
+        notebook.add(tab, text="Power-ups")
+        for row, power_up in enumerate(POWER_UP_CATALOG):
+            tk.Label(tab, text=" ", bg=power_up.color, width=3, relief="solid", bd=1).grid(
+                row=row, column=0, padx=(2, 12), pady=10, sticky="n"
+            )
+            ttk.Label(tab, text=power_up.name, font=("Courier New", 10, "bold")).grid(
+                row=row, column=1, sticky="w", pady=(7, 0)
+            )
+            ttk.Label(tab, text=f"{power_up.description} ({power_up.duration:g}s)", wraplength=420).grid(
+                row=row, column=2, sticky="w", pady=(7, 0)
+            )
+        ttk.Label(tab, text="Power-up drops can be added to flights in a future update.", wraplength=500).grid(
+            row=len(POWER_UP_CATALOG), column=0, columnspan=3, sticky="w", pady=(18, 0)
+        )
+        tab.columnconfigure(2, weight=1)
+
+    def _build_stats_tab(self, notebook, stats_store):
+        tab = ttk.Frame(notebook, padding=20)
+        notebook.add(tab, text="Stats")
+        stats = stats_store.snapshot()
+        ttk.Label(tab, text="LIFETIME FLIGHT RECORD", font=("Courier New", 12, "bold")).pack(pady=(18, 24))
+        for label, key in (("Balloons popped", "balloons_popped"), ("Bosses defeated", "bosses_defeated")):
+            row = ttk.Frame(tab)
+            row.pack(fill="x", padx=85, pady=10)
+            ttk.Label(row, text=label).pack(side="left")
+            ttk.Label(row, text=f"{stats[key]:,}", font=("Courier New", 14, "bold")).pack(side="right")
+
+    @staticmethod
+    def _add_guide_row(tab, row, color, name, description):
+        tk.Label(tab, text=" ", bg=color, width=3, relief="solid", bd=1).grid(
+            row=row, column=0, padx=(2, 12), pady=5, sticky="n"
+        )
+        ttk.Label(tab, text=name, font=("Courier New", 9, "bold")).grid(row=row, column=1, sticky="w", pady=5)
+        ttk.Label(tab, text=description, wraplength=360).grid(row=row, column=2, sticky="w", pady=5)
+        tab.columnconfigure(2, weight=1)
+        return row + 1
