@@ -149,7 +149,7 @@ class PlaneGame:
     def _step(self, delta):
         self._width = max(self.canvas.winfo_width(), 1)
         self._height = max(self.canvas.winfo_height(), 1)
-        self._cloud_offset = (self._cloud_offset + 15 * delta) % max(self._width + 140, 1)
+        self._cloud_offset += 38 * delta
 
         horizontal = int("d" in self._held_keys) - int("a" in self._held_keys)
         vertical = int("s" in self._held_keys) - int("w" in self._held_keys)
@@ -214,13 +214,12 @@ class PlaneGame:
                     break
 
     def _fire(self):
-        direction_x, direction_y = self.facing
         self.projectiles.append(
             Projectile(
-                self.plane_x + direction_x * 21,
-                self.plane_y + direction_y * 21,
-                direction_x * 470,
-                direction_y * 470,
+                self.plane_x + 21,
+                self.plane_y,
+                470,
+                0,
             )
         )
 
@@ -285,12 +284,13 @@ class PlaneGame:
 
         sun_x = self._width - 92
         self.canvas.create_oval(sun_x - 27, 72, sun_x + 27, 126, fill="#fff0a8", outline="")
-        for index, base_y in enumerate((154, 260, 374)):
-            cloud_x = (self._width + 110 - self._cloud_offset + index * self._width / 3) % (self._width + 150) - 75
-            self._draw_cloud(cloud_x, base_y, 0.9 if index == 1 else 1.0)
-        ground_y = self._height - 31
-        self.canvas.create_rectangle(0, ground_y, self._width, self._height, fill="#b4dfbd", outline="")
-        self.canvas.create_rectangle(0, ground_y, self._width, ground_y + 5, fill="#91c99f", outline="")
+        cloud_rows = ((118, 0.75), (188, 1.0), (260, 0.8), (332, 1.0), (404, 0.7), (478, 0.9))
+        cloud_period = self._width + 180
+        for index, (base_y, scale) in enumerate(cloud_rows):
+            speed = 0.65 + (index % 3) * 0.2
+            offset = self._cloud_offset * speed + index * cloud_period / len(cloud_rows)
+            cloud_x = (self._width + 100 - offset) % cloud_period - 60
+            self._draw_cloud(cloud_x, base_y, scale)
 
     def _draw_cloud(self, x, y, scale):
         block = 12 * scale

@@ -20,7 +20,7 @@ command prompt that requires typing commands. You can also run
 ## Play
 
 Select **Play** from the menu. Steer the plane with **W**, **A**, **S**, and
-**D**; press **Space** to fire in the direction the plane is facing. Pop
+**D**; press **Space** to fire to the right. Pop
 balloons to score. A balloon that escapes the left edge or collides with the
 plane costs one of your three lives. Press **Escape** to pause. Continue resumes
 the flight; Exit returns to the main menu. After game over, Continue starts a

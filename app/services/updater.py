@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-GITHUB_ARCHIVE_URL = "https://api.github.com/repos/Soullessrage/atest/zipball/main"
+GITHUB_ARCHIVE_URL = "https://api.github.com/repos/Soullessrage/Testing/zipball/main"
 MAX_ARCHIVE_SIZE = 32 * 1024 * 1024
 MAX_EXTRACTED_SIZE = 32 * 1024 * 1024
 GITHUB_TOKEN_VARIABLES = ("RETRO_PASTEL_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")

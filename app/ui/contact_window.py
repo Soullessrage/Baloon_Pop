@@ -7,7 +7,7 @@ import webbrowser
 
 # Replace these placeholders with the app owner's contact details.
 EMAIL = "your-email@example.com"
-GITHUB_URL = "https://github.com/Soullessrage/atest"
+GITHUB_URL = "https://github.com/Soullessrage/Testing"
 WEBSITE_URL = ""
 
 
