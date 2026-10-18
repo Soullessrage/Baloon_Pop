@@ -24,6 +24,7 @@ UPDATABLE_FILES = {
     PurePosixPath("Run_Pastel_Quest"),
     PurePosixPath("Run_Pastel_Quest.command"),
     PurePosixPath("app/main.py"),
+    PurePosixPath("app/game/plane_game.py"),
     PurePosixPath("app/ui/main_window.py"),
     PurePosixPath("app/ui/settings_window.py"),
     PurePosixPath("app/ui/contact_window.py"),

@@ -11,6 +11,7 @@ from tkinter import messagebox
 import webbrowser
 from pathlib import Path
 
+from game.plane_game import PlaneGame
 from services.updater import GitHubUpdater
 from ui.contact_window import ContactWindow
 from ui.settings_window import SettingsWindow
@@ -39,7 +40,7 @@ class MainWindow:
 
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Pastel Quest")
+        self.root.title("Balloon Pop")
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(720, 540)
         self.root.configure(bg="#f8dce8")
@@ -49,9 +50,12 @@ class MainWindow:
         self._update_queue: queue.Queue[str | tuple[bool, str]] = queue.Queue()
         self._update_running = False
         self._update_status = ""
+        self._screen = "menu"
+        self._game = PlaneGame(self.root, self.canvas, self._return_to_menu)
 
-        self.canvas.bind("<Configure>", self._draw_menu)
-        self.root.bind("<Escape>", lambda _event: self.root.destroy())
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.root.bind("<KeyPress>", self._on_key_press)
+        self.root.bind("<KeyRelease>", self._on_key_release)
         self.root.after(100, self._poll_update_result)
 
     def run(self):
@@ -80,14 +84,14 @@ class MainWindow:
         self.canvas.create_text(
             center_x,
             max(40, height * 0.12),
-            text="PASTEL QUEST",
+            text="BALLOON POP",
             fill="#354356",
             font=("Courier New", 24, "bold"),
         )
         self.canvas.create_text(
             center_x,
             max(72, height * 0.18),
-            text="A LITTLE PIXEL WORLD",
+            text="A PLANE GAME",
             fill="#607386",
             font=("Courier New", 10, "bold"),
         )
@@ -171,7 +175,33 @@ class MainWindow:
             self.canvas.itemconfigure(item, fill=color)
 
     def _play(self):
-        print("Play clicked")
+        self._screen = "game"
+        self._game.start()
+
+    def _return_to_menu(self):
+        self._screen = "menu"
+        self._draw_menu()
+
+    def _on_canvas_configure(self, event=None):
+        if self._screen == "game":
+            self._game.draw()
+        else:
+            self._draw_menu(event)
+
+    def _on_key_press(self, event):
+        if self._screen == "game":
+            self._game.handle_keypress(event.keysym)
+            return "break"
+        if event.keysym == "Escape":
+            self.root.destroy()
+            return "break"
+        return None
+
+    def _on_key_release(self, event):
+        if self._screen == "game":
+            self._game.handle_keyrelease(event.keysym)
+            return "break"
+        return None
 
     def _open_settings(self):
         SettingsWindow(self.root)
@@ -208,18 +238,24 @@ class MainWindow:
         else:
             if isinstance(update_message, str):
                 self._update_status = update_message
-                self._draw_menu()
+                self._on_canvas_configure()
             else:
                 self._update_running = False
                 self._update_status = ""
                 success, message = update_message
-                self._draw_menu()
+                self._on_canvas_configure()
                 if success:
                     messagebox.showinfo("Update complete", message, parent=self.root)
                     self._restart_after_update()
                 else:
                     messagebox.showerror("Update failed", message, parent=self.root)
-        self.root.after(100, self._poll_update_result)
+        try:
+            try:
+                self.root.after(100, self._poll_update_result)
+            except tk.TclError:
+                pass
+        except tk.TclError:
+            pass
 
     def _restart_after_update(self):
         try:
