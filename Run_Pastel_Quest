@@ -1,0 +1,12 @@
+#!/bin/sh
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+if ! command -v python3 >/dev/null 2>&1; then
+    printf 'Python 3.10 or newer was not found. Install Python 3 and try again.\n' >&2
+    exit 1
+fi
+if ! python3 -c 'import sys, tkinter; raise SystemExit(sys.version_info < (3, 10))' >/dev/null 2>&1; then
+    printf 'Python 3.10 or newer with Tkinter is required. Install Tkinter for your Python installation.\n' >&2
+    exit 1
+fi
+exec python3 "$SCRIPT_DIR/app/main.py"
