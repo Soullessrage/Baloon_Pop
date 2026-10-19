@@ -95,3 +95,13 @@ receive this release without a separate bootstrap step.
 
 The app uses only Python standard-library modules; there is no `pip install`
 step or dependency list to maintain.
+
+
+
+
+
+<img width="550" height="423" alt="Baloon Pop Game" src="https://github.com/user-attachments/assets/3f96a3cc-0a15-48d7-adb7-846fc9d52c21" />
+
+
+<img width="652" height="307" alt="Coffee_Background" src="https://github.com/user-attachments/assets/986b2857-ea9d-441e-bac8-34dae98d2daf" />
+
