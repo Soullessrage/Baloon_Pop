@@ -22,7 +22,7 @@ POWER_UP_DROP_CHANCE = 0.12
 POWER_UP_DROP_SPEED = 92
 BOSS_TYPES = ("heavy", "fast", "battle")
 SHOT_SPEED = 470
-SHOT_SPREAD = math.pi / 4
+SHOT_SPREAD = math.pi / 6
 
 
 @dataclass(frozen=True)
@@ -163,6 +163,7 @@ class BossBalloon:
     target_y: float
     attack_mode: str
     entering: bool = False
+    entrance_start_x: float = 0.0
 
 
 class PlaneGame:
@@ -199,6 +200,15 @@ class PlaneGame:
         self._boss_intermission_remaining = 0.0
         self._game_mode = "boss_battle"
         self.developer_mode = False
+        self._dialogue_text = ""
+        self._dialogue_elapsed = 0.0
+        self._dialogue_type_speed = 38.0
+        self._dialogue_hold_duration = 1.2
+        self._dialogue_fade_duration = 0.7
+        self._dialogue_target_x = 0.0
+        self._dialogue_target_y = 0.0
+        self._dialogue_plane_start = (0.0, 0.0)
+        self._storm_amount = 0.0
         self._score_entry_mode = ""
         self._score_initials = ""
         self.movement_scheme = "wasd"
@@ -211,7 +221,7 @@ class PlaneGame:
         self._cancel_frame()
         if mode not in {"boss_battle", "endless"}:
             raise ValueError("Game mode must be 'boss_battle' or 'endless'.")
-        self.state = "playing"
+        self.state = "story_intro"
         self._game_mode = mode
         self.developer_mode = bool(developer_mode)
         self.score = 0
@@ -228,10 +238,20 @@ class PlaneGame:
         self._boss_index = 0
         self._boss_campaign_started = mode == "endless"
         self._boss_intermission_remaining = 0.0
+        self._storm_amount = 0.0
         self.power_ups.clear()
         self._held_keys.clear()
         self._spawn_in = 0.45
         self._last_shot = 0.0
+        self.plane_x = -36
+        self.plane_y = max(74, self.canvas.winfo_height() * 0.5)
+        self._dialogue_target_x = max(60, self.canvas.winfo_width() * 0.14)
+        self._dialogue_target_y = self.canvas.winfo_height() * 0.5
+        self._begin_dialogue(
+            "Hello Pilot, You have been tasked with destroying the 99 Balloons Group, "
+            "an evil organization planning to spread balloons all over the world. "
+            "You must defeat them!"
+        )
         self._last_frame = time.perf_counter()
         self.canvas.focus_set()
         self.draw()
@@ -381,8 +401,61 @@ class PlaneGame:
         self.on_exit()
 
     def _schedule_frame(self):
-        if self.state in {"playing", "boss_entrance"} and self._after_id is None:
+        if self.state in {"playing", "story_intro", "boss_entrance", "boss_victory"} and self._after_id is None:
             self._after_id = self.root.after(16, self._tick)
+
+    def _begin_dialogue(self, text):
+        self._dialogue_text = text
+        self._dialogue_elapsed = 0.0
+        self._dialogue_plane_start = (self.plane_x, self.plane_y)
+
+    def _step_story_cinematic(self, delta):
+        self._dialogue_elapsed += delta
+        text_duration = len(self._dialogue_text) / self._dialogue_type_speed
+        fade_start = text_duration + self._dialogue_hold_duration
+        total_duration = fade_start + self._dialogue_fade_duration
+
+        if self.state == "story_intro":
+            self._move_plane_to_dialogue_target(self._dialogue_elapsed, 1.8)
+        elif self.state == "boss_entrance":
+            self._move_plane_to_dialogue_target(self._dialogue_elapsed, 2.2)
+            boss = self._boss
+            if boss is not None:
+                self._move_boss_to_target(boss, self._dialogue_elapsed, 2.6)
+                if boss.kind == "battle":
+                    self._storm_amount = min(1.0, self._dialogue_elapsed / 2.4)
+        elif self.state == "boss_victory":
+            self._storm_amount = max(0.0, 1.0 - self._dialogue_elapsed / total_duration)
+
+        if self._dialogue_elapsed < total_duration:
+            return
+        if self.state == "story_intro":
+            self.state = "playing"
+            self._spawn_in = 0.45
+        elif self.state == "boss_entrance":
+            boss = self._boss
+            if boss is not None:
+                boss.x = boss.target_x
+                boss.y = boss.target_y
+                boss.entering = False
+                boss.attack_in = 1.2
+            self.state = "playing"
+            self._last_shot = 0.0
+        else:
+            self.state = "boss_complete"
+
+    def _move_plane_to_dialogue_target(self, elapsed, duration):
+        progress = min(1.0, elapsed / duration)
+        eased = 1.0 - (1.0 - progress) ** 3
+        start_x, start_y = self._dialogue_plane_start
+        self.plane_x = start_x + (self._dialogue_target_x - start_x) * eased
+        self.plane_y = start_y + (self._dialogue_target_y - start_y) * eased
+
+    @staticmethod
+    def _move_boss_to_target(boss, elapsed, duration):
+        progress = min(1.0, elapsed / duration)
+        eased = 1.0 - (1.0 - progress) ** 3
+        boss.x = boss.entrance_start_x + (boss.target_x - boss.entrance_start_x) * eased
 
     def _cancel_frame(self):
         if self._after_id is not None:
@@ -394,7 +467,7 @@ class PlaneGame:
 
     def _tick(self):
         self._after_id = None
-        if self.state not in {"playing", "boss_entrance"}:
+        if self.state not in {"playing", "story_intro", "boss_entrance", "boss_victory"}:
             return
         now = time.perf_counter()
         delta = min(now - self._last_frame, 0.05)
@@ -409,8 +482,8 @@ class PlaneGame:
         self._world_time += delta
         self._player_hit_cooldown = max(0.0, self._player_hit_cooldown - delta)
         self._cloud_offset += 38 * delta
-        if self.state == "boss_entrance":
-            self._step_boss_entrance(delta)
+        if self.state in {"story_intro", "boss_entrance", "boss_victory"}:
+            self._step_story_cinematic(delta)
             return
         self.power_ups.update(delta)
 
@@ -458,7 +531,7 @@ class PlaneGame:
             self._update_boss(delta)
 
         if self.state == "boss_entrance":
-            self._step_boss_entrance(delta)
+            self._step_story_cinematic(delta)
             return
 
         expired_balloons = []
@@ -581,12 +654,18 @@ class PlaneGame:
         health = {"heavy": 12, "fast": 14, "battle": 45}[kind]
         target_x = self._width * 0.74
         boss_y = self._height * 0.5
+        plane_target_x = max(60, self._width * 0.14)
         self.balloons.clear()
         self.pickups.clear()
         self.projectiles.clear()
         self._held_keys.clear()
-        self.plane_x = max(60, self._width * 0.14)
-        self.plane_y = self._height * 0.5
+        self._dialogue_target_x = plane_target_x
+        self._dialogue_target_y = self._height * 0.5
+        boss_dialogue = {
+            "heavy": "Oh no! That must be a boss! Seems pretty strong!",
+            "fast": "Another boss! It's quick, so stay sharp and keep moving!",
+            "battle": "It's the Battle Balloon! It's using every trick they've got. Take it down!",
+        }
         self._boss = BossBalloon(
             x=self._width + 90,
             y=boss_y,
@@ -601,23 +680,10 @@ class PlaneGame:
             target_y=boss_y,
             attack_mode="heavy",
             entering=True,
+            entrance_start_x=self._width + 90,
         )
+        self._begin_dialogue(boss_dialogue[kind])
         self.state = "boss_entrance"
-
-    def _step_boss_entrance(self, delta):
-        boss = self._boss
-        if boss is None:
-            self.state = "playing"
-            return
-        entrance_speed = 250
-        distance = boss.target_x - boss.x
-        boss.x += math.copysign(min(abs(distance), entrance_speed * delta), distance)
-        if abs(boss.target_x - boss.x) < 0.5:
-            boss.x = boss.target_x
-            boss.entering = False
-            self.state = "playing"
-            self._last_shot = 0.0
-            boss.attack_in = 1.2
 
     def _update_boss(self, delta):
         boss = self._boss
@@ -712,7 +778,8 @@ class PlaneGame:
         self.balloons = [balloon for balloon in self.balloons if not balloon.hostile]
         if boss.kind == "battle":
             self._held_keys.clear()
-            self.state = "boss_complete"
+            self._begin_dialogue("You did it, Pilot! The 99 Balloons Group is finished. Excellent work!")
+            self.state = "boss_victory"
         else:
             self._boss_index += 1
             self._boss_intermission_remaining = BOSS_INTERMISSION_DURATION
@@ -781,14 +848,8 @@ class PlaneGame:
             )
         if self.state not in {"game_over", "score_entry", "score_saved"}:
             self._draw_plane()
-        if self.state == "boss_entrance":
-            boss_name = {"heavy": "HEAVY BALLOON", "fast": "FAST BALLOON", "battle": "BATTLE BALLOON"}
-            self.canvas.create_text(
-                self._width / 2, 52,
-                text=f"{boss_name[self._boss.kind]} APPROACHING",
-                fill="#354356",
-                font=("Courier New", 12, "bold"),
-            )
+        if self.state in {"story_intro", "boss_entrance", "boss_victory"}:
+            self._draw_dialogue_box()
         if self.state == "paused":
             buttons = [("CONTINUE", self.continue_game, "#b9e3c9")]
             if self.developer_mode:
@@ -873,32 +934,100 @@ class PlaneGame:
             red = round(193 + (229 - 193) * amount)
             green = round(229 + (244 - 229) * amount)
             blue = round(249 + (250 - 249) * amount)
+            sky_color = f"#{red:02x}{green:02x}{blue:02x}"
+            sky_color = self._blend_color(sky_color, "#59636f", self._storm_amount)
             self.canvas.create_rectangle(
                 0,
                 y,
                 self._width,
                 y + 4,
-                fill=f"#{red:02x}{green:02x}{blue:02x}",
+                fill=sky_color,
                 outline="",
             )
 
         sun_x = self._width - 92
-        self.canvas.create_oval(sun_x - 27, 72, sun_x + 27, 126, fill="#fff0a8", outline="")
+        sun_color = self._blend_color("#fff0a8", "#818991", self._storm_amount)
+        self.canvas.create_oval(sun_x - 27, 72, sun_x + 27, 126, fill=sun_color, outline="")
         cloud_rows = ((118, 0.75), (188, 1.0), (260, 0.8), (332, 1.0), (404, 0.7), (478, 0.9))
         cloud_period = self._width + 180
         for index, (base_y, scale) in enumerate(cloud_rows):
             speed = 0.65 + (index % 3) * 0.2
             offset = self._cloud_offset * speed + index * cloud_period / len(cloud_rows)
             cloud_x = (self._width + 100 - offset) % cloud_period - 60
-            self._draw_cloud(cloud_x, base_y, scale)
+            cloud_color = self._blend_color("#f8fcff", "#89939d", self._storm_amount)
+            self._draw_cloud(cloud_x, base_y, scale, cloud_color)
+        if self._storm_amount > 0.05:
+            rain_color = self._blend_color("#d5e1eb", "#77838f", self._storm_amount)
+            rain_offset = (self._world_time * 210) % 58
+            for index in range(20):
+                x = (index * 71 + rain_offset) % max(self._width, 1)
+                y = (index * 47 + rain_offset * 1.8) % max(self._height, 1)
+                self.canvas.create_line(x, y, x - 9, y + 18, fill=rain_color, width=1)
 
-    def _draw_cloud(self, x, y, scale):
+    @staticmethod
+    def _blend_color(start, end, amount):
+        amount = max(0.0, min(1.0, amount))
+        start_rgb = tuple(int(start[index:index + 2], 16) for index in (1, 3, 5))
+        end_rgb = tuple(int(end[index:index + 2], 16) for index in (1, 3, 5))
+        blended = tuple(round(first + (last - first) * amount) for first, last in zip(start_rgb, end_rgb))
+        return f"#{blended[0]:02x}{blended[1]:02x}{blended[2]:02x}"
+
+    def _draw_cloud(self, x, y, scale, color="#f8fcff"):
         block = 12 * scale
-        color = "#f8fcff"
         self.canvas.create_rectangle(x, y, x + 5 * block, y + block, fill=color, outline="")
         self.canvas.create_rectangle(x + block, y - block, x + 4 * block, y + block, fill=color, outline="")
         self.canvas.create_rectangle(x + 2 * block, y - 2 * block, x + 3 * block, y + block, fill=color, outline="")
         self.canvas.create_rectangle(x + block / 2, y + block, x + 4.5 * block, y + 1.5 * block, fill=color, outline="")
+
+    def _draw_dialogue_box(self):
+        text_duration = len(self._dialogue_text) / self._dialogue_type_speed
+        fade_start = text_duration + self._dialogue_hold_duration
+        fade = max(0.0, min(1.0, (self._dialogue_elapsed - fade_start) / self._dialogue_fade_duration))
+        panel_color = self._blend_color("#26384a", "#f7f5e9", fade)
+        panel_edge = self._blend_color("#f7f5e9", "#26384a", fade)
+        text_color = self._blend_color("#f7f5e9", "#26384a", fade)
+        silhouette = self._blend_color("#111c29", "#f7f5e9", fade)
+        margin = 22
+        panel_height = min(144, self._height * 0.28)
+        top = self._height - panel_height - margin
+        left = margin
+        right = self._width - margin
+        self.canvas.create_rectangle(left + 4, top + 5, right + 4, self._height - margin + 5,
+                                     fill="#26384a", outline="")
+        self.canvas.create_rectangle(left, top, right, self._height - margin, fill=panel_color,
+                                     outline=panel_edge, width=2)
+
+        card_left = left + 12
+        card_right = left + 157
+        card_top = top + 12
+        self.canvas.create_rectangle(card_left, card_top, card_right, self._height - margin - 12,
+                                     fill=self._blend_color("#34495d", "#e4e0d2", fade),
+                                     outline=self._blend_color("#71869a", "#d0cbbd", fade))
+        center = (card_left + card_right) / 2
+        figure_y = card_top + (panel_height - 48) * 0.48
+        self.canvas.create_rectangle(center - 25, figure_y - 27, center + 25, figure_y + 10,
+                                     fill=silhouette, outline="")
+        self.canvas.create_rectangle(center - 12, figure_y - 48, center + 12, figure_y - 29,
+                                     fill=silhouette, outline="")
+        self.canvas.create_polygon(
+            center - 24, figure_y + 10, center + 24, figure_y + 10,
+            center + 31, figure_y + 37, center - 31, figure_y + 37,
+            fill=silhouette, outline="",
+        )
+        self.canvas.create_text(center, self._height - margin - 25, text="GENERAL B.",
+                                fill=text_color, font=("Courier New", 10, "bold"))
+        visible_characters = min(len(self._dialogue_text), int(self._dialogue_elapsed * self._dialogue_type_speed))
+        shown_text = self._dialogue_text[:visible_characters]
+        text_left = card_right + 26
+        self.canvas.create_text(
+            text_left,
+            top + panel_height / 2,
+            anchor="w",
+            width=max(80, right - text_left - 16),
+            text=shown_text,
+            fill=text_color,
+            font=("Courier New", 11, "bold"),
+        )
 
     def _draw_hud(self):
         self.canvas.create_text(
