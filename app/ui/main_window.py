@@ -9,15 +9,13 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 import webbrowser
 from pathlib import Path
 
-from game.plane_game import PASTEL_BALLOON_COLORS, POWER_UP_CATALOG, PlaneGame
+from game.plane_game import POWER_UP_CATALOG, PlaneGame
 from services.updater import GitHubUpdater
-from ui.contact_window import ContactWindow
-from ui.controls_window import ControlsWindow
-from ui.settings_window import SettingsWindow
+from ui.contact_window import EMAIL, GITHUB_URL, WEBSITE_URL
 
 
 WINDOW_WIDTH = 900
@@ -39,7 +37,7 @@ def _blend(start: str, end: str, amount: float) -> str:
 
 
 class MainWindow:
-    """Own the root window, main menu, dialogs, and background updater."""
+    """Own the app's canvas screens, game, and background updater."""
 
     def __init__(self):
         self.root = tk.Tk()
@@ -54,6 +52,8 @@ class MainWindow:
         self._update_running = False
         self._update_status = ""
         self._screen = "menu"
+        self._transition_id = None
+        self._settings = {"music": True, "pixel_effects": True}
         self._stats = StatsStore()
         self._game = PlaneGame(
             self.root,
@@ -61,6 +61,7 @@ class MainWindow:
             self._return_to_menu,
             self._stats.record_balloon_popped,
             self._stats.record_boss_defeated,
+            self._record_score,
         )
 
         self.canvas.bind("<Configure>", self._on_canvas_configure)
@@ -90,113 +91,182 @@ class MainWindow:
                     break
             self.canvas.create_rectangle(0, y, width, y + strip_height, fill=color, outline="")
 
+        title, subtitle = {
+            "menu": ("BALLOON POP", "A PLANE GAME"),
+            "settings": ("SETTINGS", "CUSTOMIZE YOUR FLIGHT"),
+            "controls": ("CONTROLS", "CHOOSE HOW TO FLY"),
+            "guide": ("FLIGHT GUIDE", "POWER-UPS AND BOSSES"),
+            "scores": ("ARCADE RECORDS", "BEST BOSS AND ENDLESS RUNS"),
+            "contact": ("SAY HELLO", "CONTACT AND PROJECT LINKS"),
+        }.get(self._screen, ("BALLOON POP", "A PLANE GAME"))
         center_x = width / 2
-        self.canvas.create_text(
-            center_x,
-            max(40, height * 0.12),
-            text="BALLOON POP",
-            fill="#354356",
-            font=("Courier New", 24, "bold"),
+        self.canvas.create_text(center_x, max(36, height * 0.10), text=title, fill="#354356",
+                                font=("Courier New", 23, "bold"))
+        self.canvas.create_text(center_x, max(65, height * 0.16), text=subtitle, fill="#607386",
+                                font=("Courier New", 9, "bold"))
+
+        if self._screen == "menu":
+            self._draw_home_page(width, height)
+        elif self._screen == "settings":
+            self._draw_settings_page(width, height)
+        elif self._screen == "controls":
+            self._draw_controls_page(width, height)
+        elif self._screen == "guide":
+            self._draw_guide_page(width, height)
+        elif self._screen == "scores":
+            self._draw_scores_page(width, height)
+        elif self._screen == "contact":
+            self._draw_contact_page(width, height)
+
+    def _draw_home_page(self, width, height):
+        center_x = width / 2
+        button_width = min(275, (width - 72) / 2)
+        button_height = 48
+        left_x, right_x = center_x - button_width / 2 - 10, center_x + button_width / 2 + 10
+        items = (
+            (left_x, "BOSS CAMPAIGN", "#d1edda", self._play),
+            (right_x, "SETTINGS", "#d4e8fa", self._open_settings),
+            (left_x, "CONTROLS", "#e4d8f5", self._open_controls),
+            (right_x, "GUIDE & RECORDS", "#f6d9e8", self._open_book),
+            (left_x, "CONTACT", "#f7edbe", self._open_contact),
+            (right_x, "BUY ME A COFFEE", "#f7edbe", self._buy_coffee),
+            (center_x, "UPDATE", "#f5c99b", self._update_app),
         )
-        self.canvas.create_text(
-            center_x,
-            max(72, height * 0.18),
-            text="A PLANE GAME",
-            fill="#607386",
-            font=("Courier New", 10, "bold"),
-        )
-
-        button_width = min(390, width - 56)
-        button_height = 46
-        button_gap = 10
-        labels = [
-            ("PLAY", "#d1edda", "#b8e3c8", self._play),
-            ("SETTINGS", "#d4e8fa", "#bddcf5", self._open_settings),
-            ("CONTROLS", "#e4d8f5", "#d1c0ed", self._open_controls),
-            ("CONTACT ME", "#f6d9e8", "#efc2d8", self._open_contact),
-            ("BUY ME A COFFEE", "#f7edbe", "#f0e39e", self._buy_coffee),
-            ("UPDATE", "#f5c99b", "#efa96d", self._update_app),
-        ]
-        menu_height = button_height * len(labels) + button_gap * (len(labels) - 1) + 20
-        first_y = max(height * 0.31, (height - menu_height) / 2 + 26)
-
-        for index, (label, color, hover_color, callback) in enumerate(labels):
-            y = first_y + index * (button_height + button_gap)
-            if label == "UPDATE":
-                separator_y = y - 10
-                self.canvas.create_line(
-                    center_x - button_width / 2,
-                    separator_y,
-                    center_x + button_width / 2,
-                    separator_y,
-                    fill="#9aabb7",
-                    width=2,
-                )
-            tag = f"menu-{index}"
-            self._draw_button(center_x, y, button_width, button_height, label, color, tag)
-            self.canvas.tag_bind(tag, "<Enter>", lambda _event, t=tag, c=hover_color: self._set_button_color(t, c))
-            self.canvas.tag_bind(tag, "<Leave>", lambda _event, t=tag, c=color: self._set_button_color(t, c))
-            self.canvas.tag_bind(tag, "<Button-1>", lambda _event, action=callback: action())
-
+        first_y = max(height * 0.29, 165)
+        for index, (x, label, color, action) in enumerate(items):
+            row = index // 2
+            if index == len(items) - 1:
+                row = 3
+            self._add_page_button(x, first_y + row * 62, button_width, button_height, label, color, action, index)
         if self._update_running:
-            self.canvas.create_text(
-                center_x,
-                min(height - 40, first_y + menu_height + 9),
-                text=self._update_status or "UPDATING REPOSITORY...",
-                fill="#5a6877",
-                font=("Courier New", 9, "bold"),
-            )
+            self.canvas.create_text(center_x, min(height - 35, first_y + 4 * 62),
+                                    text=self._update_status or "UPDATING REPOSITORY...",
+                                    fill="#5a6877", font=("Courier New", 9, "bold"))
+        self.canvas.create_text(center_x, height - 18,
+                                text="Author: Soullessrage - Made with AI as a proof of concept",
+                                fill="#607386", font=("Courier New", 8))
 
-        self.canvas.create_text(
-            center_x,
-            height - 18,
-            text="Author: Soullessrage - Made with AI as a proof of concept",
-            fill="#607386",
-            font=("Courier New", 8),
-        )
+    def _draw_settings_page(self, width, height):
+        center_x = width / 2
+        for index, (key, label, color) in enumerate((
+            ("music", "Music", "#d4e8fa"),
+            ("pixel_effects", "Pixel effects", "#e4d8f5"),
+        )):
+            state = "ON" if self._settings[key] else "OFF"
+            self._add_page_button(center_x, 210 + index * 65, 330, 48, f"{label}: {state}", color,
+                                  lambda setting=key: self._toggle_setting(setting), index)
+        self._draw_back_button(width, height)
 
-        book_tag = "main-menu-book"
-        book_left = width - 62
-        book_top = height - 56
-        book_bottom = height - 20
-        self.canvas.create_polygon(
-            book_left,
-            book_top + 3,
-            book_left + 15,
-            book_top + 7,
-            book_left + 15,
-            book_bottom,
-            book_left,
-            book_bottom - 4,
-            fill="#d7b5e8",
-            outline="#ffffff",
-            width=2,
-            tags=(book_tag,),
+    def _draw_controls_page(self, width, height):
+        center_x = width / 2
+        self.canvas.create_text(center_x, 175, text="MOVEMENT KEYS", fill="#354356",
+                                font=("Courier New", 11, "bold"))
+        for index, (label, scheme) in enumerate((("WASD", "wasd"), ("ARROW KEYS", "arrows"))):
+            color = "#b9e3c9" if self._game.movement_scheme == scheme else "#e4d8f5"
+            self._add_page_button(center_x, 220 + index * 62, 250, 46, label, color,
+                                  lambda value=scheme: self._set_movement_scheme(value), index)
+        self._draw_back_button(width, height)
+
+    def _draw_guide_page(self, width, height):
+        x, y = max(42, width * 0.12), 145
+        for power_up in POWER_UP_CATALOG:
+            self.canvas.create_oval(x, y - 8, x + 16, y + 8, fill=power_up.color, outline="#ffffff", width=2)
+            self.canvas.create_text(x + 31, y, anchor="w",
+                                    text=f"{power_up.name}  -  {power_up.description} ({power_up.duration:g}s)",
+                                    fill="#354356", font=("Courier New", 9))
+            y += 34
+        y += 12
+        boss_descriptions = (
+            "Heavy Balloon: fires large, two-hit balloons that can be dodged or shot.",
+            "Fast Balloon: jolts around and releases balloons that chase the plane.",
+            "Battle Balloon: combines the other bosses' attacks. Defeat it to unlock endless.",
         )
-        self.canvas.create_polygon(
-            book_left + 17,
-            book_top + 7,
-            book_left + 32,
-            book_top + 3,
-            book_left + 32,
-            book_bottom - 4,
-            book_left + 17,
-            book_bottom,
-            fill="#f3e6b0",
-            outline="#ffffff",
-            width=2,
-            tags=(book_tag,),
+        for index, description in enumerate(boss_descriptions):
+            self.canvas.create_text(x, y, anchor="w", width=width - 2 * x,
+                                    text=description, fill="#354356", font=("Courier New", 9))
+            y += 36
+        self.canvas.create_text(x, y + 4, anchor="w", width=width - 2 * x,
+                                text="Pop balloons for a chance to drop a power-up. Boss score falls with fight time.",
+                                fill="#607386", font=("Courier New", 9))
+        self._add_page_button(width / 2 - 130, height - 82, 200, 44, "ARCADE RECORDS", "#d4e8fa",
+                              lambda: self._navigate("scores"), "records")
+        self._add_page_button(width / 2 + 130, height - 82, 200, 44, "BACK TO MENU", "#f2c5d4",
+                              lambda: self._navigate("menu"), "back")
+
+    def _draw_scores_page(self, width, height):
+        center_x = width / 2
+        stats = self._stats.snapshot()
+        self.canvas.create_text(center_x, 125, text=f"BALLOONS POPPED  {stats['balloons_popped']:,}     "
+                                f"BOSSES DEFEATED  {stats['bosses_defeated']:,}",
+                                fill="#354356", font=("Courier New", 9, "bold"))
+        columns = (("BOSS BATTLE", "boss_battle", center_x - width * 0.22),
+                   ("ENDLESS MODE", "endless", center_x + width * 0.22))
+        for title, mode, x in columns:
+            self.canvas.create_text(x, 170, text=title, fill="#354356", font=("Courier New", 11, "bold"))
+            scores = self._stats.high_scores(mode)
+            if not scores:
+                self.canvas.create_text(x, 205, text="NO RECORDS YET", fill="#607386", font=("Courier New", 9))
+            for index, entry in enumerate(scores[:10]):
+                initials = str(entry["initials"])
+                score = int(entry["score"])
+                self.canvas.create_text(x, 205 + index * 26,
+                                        text=f"{index + 1:2}. {initials:<3}  {score:>6,}",
+                                        fill="#354356", font=("Courier New", 10))
+        self._draw_back_button(width, height)
+
+    def _draw_contact_page(self, width, height):
+        center_x = width / 2
+        details = (("Email", EMAIL), ("GitHub", GITHUB_URL), ("Website", WEBSITE_URL or "Not provided"))
+        for index, (label, value) in enumerate(details):
+            self.canvas.create_text(center_x, 210 + index * 38, text=f"{label}:  {value}",
+                                    fill="#354356", font=("Courier New", 9))
+        self._add_page_button(center_x, 345, 220, 46, "OPEN GITHUB", "#d4e8fa",
+                              lambda: webbrowser.open(GITHUB_URL), 0)
+        self._draw_back_button(width, height)
+
+    def _draw_back_button(self, width, height):
+        self._add_page_button(width / 2, height - 82, 220, 44, "BACK TO MENU", "#f2c5d4",
+                              lambda: self._navigate("menu"), "back")
+
+    def _add_page_button(self, center_x, top, width, height, label, color, action, tag):
+        button_tag = f"page-button-{tag}"
+        self._draw_button(center_x, top, width, height, label, color, button_tag)
+        self.canvas.tag_bind(button_tag, "<Enter>", lambda _event, t=button_tag, c=_blend(color, "#ffffff", 0.14):
+                             self._set_button_color(t, c))
+        self.canvas.tag_bind(button_tag, "<Leave>", lambda _event, t=button_tag, c=color:
+                             self._set_button_color(t, c))
+        self.canvas.tag_bind(button_tag, "<Button-1>", lambda _event, callback=action: callback())
+
+    def _toggle_setting(self, key):
+        self._settings[key] = not self._settings[key]
+        self._draw_menu()
+
+    def _set_movement_scheme(self, scheme):
+        self._game.set_movement_scheme(scheme)
+        self._draw_menu()
+
+    def _navigate(self, screen):
+        self._screen = screen
+        self._draw_menu()
+        if self._settings["pixel_effects"]:
+            if self._transition_id is not None:
+                self.root.after_cancel(self._transition_id)
+            width = max(self.canvas.winfo_width(), 1)
+            height = max(self.canvas.winfo_height(), 1)
+            self.canvas.delete("screen-transition")
+            self.canvas.create_rectangle(0, 0, width, height, fill="#ffffff", stipple="gray50",
+                                         outline="", tags=("screen-transition",))
+            self._reveal_screen(0, width, height)
+
+    def _reveal_screen(self, frame, width, height):
+        if frame >= 6:
+            self.canvas.delete("screen-transition")
+            self._transition_id = None
+            return
+        self.canvas.coords("screen-transition", 0, 0, width * (1 - (frame + 1) / 6), height)
+        self._transition_id = self.root.after(
+            18, lambda: self._reveal_screen(frame + 1, width, height)
         )
-        self.canvas.create_line(
-            book_left + 16,
-            book_top + 7,
-            book_left + 16,
-            book_bottom,
-            fill="#71808c",
-            width=2,
-            tags=(book_tag,),
-        )
-        self.canvas.tag_bind(book_tag, "<Button-1>", lambda _event: self._open_book())
 
     def _draw_button(self, center_x, top, width, height, label, color, tag):
         left = center_x - width / 2
@@ -236,13 +306,12 @@ class MainWindow:
         for item in self.canvas.find_withtag(f"{tag}-face"):
             self.canvas.itemconfigure(item, fill=color)
 
-    def _play(self):
+    def _play(self, mode="boss_battle"):
         self._screen = "game"
-        self._game.start()
+        self._game.start(mode)
 
     def _return_to_menu(self):
-        self._screen = "menu"
-        self._draw_menu()
+        self._navigate("menu")
 
     def _on_canvas_configure(self, event=None):
         if self._screen == "game":
@@ -255,7 +324,10 @@ class MainWindow:
             self._game.handle_keypress(event.keysym)
             return "break"
         if event.keysym == "Escape":
-            self.root.destroy()
+            if self._screen == "menu":
+                self.root.destroy()
+            else:
+                self._navigate("menu")
             return "break"
         return None
 
@@ -266,16 +338,26 @@ class MainWindow:
         return None
 
     def _open_settings(self):
-        SettingsWindow(self.root)
+        self._navigate("settings")
 
     def _open_controls(self):
-        ControlsWindow(self.root, self._game.movement_scheme, self._game.set_movement_scheme)
+        self._navigate("controls")
 
     def _open_book(self):
-        BookWindow(self.root, self._stats)
+        self._navigate("guide")
 
     def _open_contact(self):
-        ContactWindow(self.root)
+        self._navigate("contact")
+
+    def _record_score(self, mode, score, initials):
+        try:
+            saved = self._stats.add_high_score(mode, initials, score)
+        except OSError as error:
+            messagebox.showerror("Score not saved", f"The high score could not be saved:\n{error}", parent=self.root)
+            return False
+        if not saved:
+            messagebox.showinfo("High score", "That score did not make the top 10.", parent=self.root)
+        return saved
 
     @staticmethod
     def _buy_coffee():
@@ -352,6 +434,11 @@ class StatsStore:
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path is not None else _default_stats_path()
         self._stats = {"balloons_popped": 0, "bosses_defeated": 0}
+        self._high_scores: dict[str, list[dict[str, int | str]]] = {
+            "boss_battle": [],
+            "endless": [],
+        }
+        self._last_save_error: OSError | None = None
         self._load()
 
     def record_balloon_popped(self) -> None:
@@ -365,6 +452,34 @@ class StatsStore:
     def snapshot(self) -> dict[str, int]:
         return dict(self._stats)
 
+    def high_scores(self, mode: str) -> list[dict[str, int | str]]:
+        if mode not in self._high_scores:
+            raise ValueError("High-score mode must be 'boss_battle' or 'endless'.")
+        return [dict(entry) for entry in self._high_scores[mode]]
+
+    def qualifies_for_high_score(self, mode: str, score: int) -> bool:
+        scores = self.high_scores(mode)
+        return len(scores) < 10 or score > scores[-1]["score"]
+
+    def add_high_score(self, mode: str, initials: str, score: int) -> bool:
+        if mode not in self._high_scores:
+            raise ValueError("High-score mode must be 'boss_battle' or 'endless'.")
+        if not (len(initials) == 3 and initials.isalpha() and initials.isupper()):
+            raise ValueError("Initials must contain three uppercase letters.")
+        if isinstance(score, bool) or not isinstance(score, int) or score < 0:
+            raise ValueError("High scores must be non-negative integers.")
+        if not self.qualifies_for_high_score(mode, score):
+            return False
+
+        previous = self._high_scores[mode]
+        updated = [*previous, {"initials": initials, "score": score}]
+        updated.sort(key=lambda entry: entry["score"], reverse=True)
+        self._high_scores[mode] = updated[:10]
+        if not self._save():
+            self._high_scores[mode] = previous
+            raise OSError(f"Could not write high scores to {self.path}.") from self._last_save_error
+        return True
+
     def _load(self) -> None:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -376,84 +491,44 @@ class StatsStore:
             value = data.get(key)
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 self._stats[key] = value
+        raw_high_scores = data.get("high_scores")
+        if not isinstance(raw_high_scores, dict):
+            return
+        for mode in self._high_scores:
+            entries = raw_high_scores.get(mode)
+            if not isinstance(entries, list):
+                continue
+            valid_entries = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                initials, score = entry.get("initials"), entry.get("score")
+                if (
+                    isinstance(initials, str)
+                    and 1 <= len(initials) <= 3
+                    and initials.isalpha()
+                    and initials.isupper()
+                    and isinstance(score, int)
+                    and not isinstance(score, bool)
+                    and score >= 0
+                ):
+                    valid_entries.append({"initials": initials, "score": score})
+            valid_entries.sort(key=lambda entry: entry["score"], reverse=True)
+            self._high_scores[mode] = valid_entries[:10]
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
         temporary_path = self.path.with_suffix(".tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path.write_text(json.dumps(self._stats, indent=2) + "\n", encoding="utf-8")
+            data = {**self._stats, "high_scores": self._high_scores}
+            temporary_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
             os.replace(temporary_path, self.path)
-        except OSError:
+            self._last_save_error = None
+            return True
+        except OSError as error:
+            self._last_save_error = error
             try:
                 temporary_path.unlink(missing_ok=True)
             except OSError:
                 pass
-
-
-class BookWindow:
-    """Show balloon types, planned power-ups, and lifetime statistics."""
-
-    def __init__(self, parent, stats_store):
-        self.window = tk.Toplevel(parent)
-        self.window.title("Balloon Pop Book")
-        self.window.geometry("620x440")
-        self.window.minsize(520, 360)
-        self.window.configure(bg="#e4edf5")
-        self.window.transient(parent)
-        self.window.grab_set()
-
-        ttk.Label(self.window, text="BALLOON POP BOOK", font=("Courier New", 15, "bold")).pack(pady=(16, 10))
-        notebook = ttk.Notebook(self.window)
-        notebook.pack(fill="both", expand=True, padx=18, pady=(0, 16))
-        self._build_balloon_tab(notebook)
-        self._build_power_up_tab(notebook)
-        self._build_stats_tab(notebook, stats_store)
-
-    def _build_balloon_tab(self, notebook):
-        tab = ttk.Frame(notebook, padding=14)
-        notebook.add(tab, text="Balloons")
-        row = 0
-        for index, color in enumerate(PASTEL_BALLOON_COLORS, start=1):
-            row = self._add_guide_row(tab, row, color, f"Pastel balloon {index}", "Pop for one point; a miss costs one life.")
-        row = self._add_guide_row(tab, row, "#a8dba8", "Boss balloon", "Turns grey while shields remain, then green, yellow, and red as health falls.")
-        row = self._add_guide_row(tab, row, "#c5a3e8", "Orbiting shield balloon", "Three orbit the boss. Pop all three before damaging its core.")
-        self._add_guide_row(tab, row, "#a9b8c9", "Indestructible hazard", "Released during the boss fight. Dodge it; it gives no points.")
-
-    def _build_power_up_tab(self, notebook):
-        tab = ttk.Frame(notebook, padding=14)
-        notebook.add(tab, text="Power-ups")
-        for row, power_up in enumerate(POWER_UP_CATALOG):
-            tk.Label(tab, text=" ", bg=power_up.color, width=3, relief="solid", bd=1).grid(
-                row=row, column=0, padx=(2, 12), pady=10, sticky="n"
-            )
-            ttk.Label(tab, text=power_up.name, font=("Courier New", 10, "bold")).grid(
-                row=row, column=1, sticky="w", pady=(7, 0)
-            )
-            ttk.Label(tab, text=f"{power_up.description} ({power_up.duration:g}s)", wraplength=420).grid(
-                row=row, column=2, sticky="w", pady=(7, 0)
-            )
-        ttk.Label(tab, text="Power-up drops can be added to flights in a future update.", wraplength=500).grid(
-            row=len(POWER_UP_CATALOG), column=0, columnspan=3, sticky="w", pady=(18, 0)
-        )
-        tab.columnconfigure(2, weight=1)
-
-    def _build_stats_tab(self, notebook, stats_store):
-        tab = ttk.Frame(notebook, padding=20)
-        notebook.add(tab, text="Stats")
-        stats = stats_store.snapshot()
-        ttk.Label(tab, text="LIFETIME FLIGHT RECORD", font=("Courier New", 12, "bold")).pack(pady=(18, 24))
-        for label, key in (("Balloons popped", "balloons_popped"), ("Bosses defeated", "bosses_defeated")):
-            row = ttk.Frame(tab)
-            row.pack(fill="x", padx=85, pady=10)
-            ttk.Label(row, text=label).pack(side="left")
-            ttk.Label(row, text=f"{stats[key]:,}", font=("Courier New", 14, "bold")).pack(side="right")
-
-    @staticmethod
-    def _add_guide_row(tab, row, color, name, description):
-        tk.Label(tab, text=" ", bg=color, width=3, relief="solid", bd=1).grid(
-            row=row, column=0, padx=(2, 12), pady=5, sticky="n"
-        )
-        ttk.Label(tab, text=name, font=("Courier New", 9, "bold")).grid(row=row, column=1, sticky="w", pady=5)
-        ttk.Label(tab, text=description, wraplength=360).grid(row=row, column=2, sticky="w", pady=5)
-        tab.columnconfigure(2, weight=1)
-        return row + 1
+            return False
