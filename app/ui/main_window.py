@@ -20,7 +20,7 @@ from ui.contact_window import EMAIL, GITHUB_URL, WEBSITE_URL
 
 WINDOW_WIDTH = 900
 WINDOW_HEIGHT = 600
-BUY_ME_A_COFFEE_URL = "https://www.buymeacoffee.com/YOURNAME"
+BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/soullessrage"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 APP_ENTRY = Path(__file__).resolve().parents[1] / "main.py"
 
