@@ -104,6 +104,12 @@ class MainWindow:
                                 font=("Courier New", 23, "bold"))
         self.canvas.create_text(center_x, max(65, height * 0.16), text=subtitle, fill="#607386",
                                 font=("Courier New", 9, "bold"))
+        if self._screen == "menu":
+            self.canvas.create_text(
+                center_x, max(88, height * 0.22),
+                text="SHIFT + CLICK BOSS CAMPAIGN FOR DEVELOPER MODE",
+                fill="#607386", font=("Courier New", 8, "bold"),
+            )
 
         if self._screen == "menu":
             self._draw_home_page(width, height)
@@ -124,7 +130,7 @@ class MainWindow:
         button_height = 48
         left_x, right_x = center_x - button_width / 2 - 10, center_x + button_width / 2 + 10
         items = (
-            (left_x, "BOSS CAMPAIGN", "#d1edda", self._play),
+            (left_x, "BOSS CAMPAIGN", "#d1edda", self._start_boss_campaign),
             (right_x, "SETTINGS", "#d4e8fa", self._open_settings),
             (left_x, "CONTROLS", "#e4d8f5", self._open_controls),
             (right_x, "GUIDE & RECORDS", "#f6d9e8", self._open_book),
@@ -137,7 +143,10 @@ class MainWindow:
             row = index // 2
             if index == len(items) - 1:
                 row = 3
-            self._add_page_button(x, first_y + row * 62, button_width, button_height, label, color, action, index)
+            self._add_page_button(
+                x, first_y + row * 62, button_width, button_height, label, color, action, index,
+                pass_event=label == "BOSS CAMPAIGN",
+            )
         if self._update_running:
             self.canvas.create_text(center_x, min(height - 35, first_y + 4 * 62),
                                     text=self._update_status or "UPDATING REPOSITORY...",
@@ -228,14 +237,17 @@ class MainWindow:
         self._add_page_button(width / 2, height - 82, 220, 44, "BACK TO MENU", "#f2c5d4",
                               lambda: self._navigate("menu"), "back")
 
-    def _add_page_button(self, center_x, top, width, height, label, color, action, tag):
+    def _add_page_button(self, center_x, top, width, height, label, color, action, tag, pass_event=False):
         button_tag = f"page-button-{tag}"
         self._draw_button(center_x, top, width, height, label, color, button_tag)
         self.canvas.tag_bind(button_tag, "<Enter>", lambda _event, t=button_tag, c=_blend(color, "#ffffff", 0.14):
                              self._set_button_color(t, c))
         self.canvas.tag_bind(button_tag, "<Leave>", lambda _event, t=button_tag, c=color:
                              self._set_button_color(t, c))
-        self.canvas.tag_bind(button_tag, "<Button-1>", lambda _event, callback=action: callback())
+        if pass_event:
+            self.canvas.tag_bind(button_tag, "<Button-1>", lambda event, callback=action: callback(event))
+        else:
+            self.canvas.tag_bind(button_tag, "<Button-1>", lambda _event, callback=action: callback())
 
     def _toggle_setting(self, key):
         self._settings[key] = not self._settings[key]
@@ -306,9 +318,12 @@ class MainWindow:
         for item in self.canvas.find_withtag(f"{tag}-face"):
             self.canvas.itemconfigure(item, fill=color)
 
-    def _play(self, mode="boss_battle"):
+    def _play(self, mode="boss_battle", developer_mode=False):
         self._screen = "game"
-        self._game.start(mode)
+        self._game.start(mode, developer_mode=developer_mode)
+
+    def _start_boss_campaign(self, event):
+        self._play(developer_mode=bool(event.state & 0x0001))
 
     def _return_to_menu(self):
         self._navigate("menu")

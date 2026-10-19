@@ -16,10 +16,13 @@ REGULAR_SPAWN_START = 1.5
 REGULAR_SPAWN_MIN = 0.72
 REGULAR_SPAWN_RAMP = 0.006
 GAME_VERSION = "VER. 0.3"
-BOSS_SCORE_THRESHOLD = 150
+BOSS_SCORE_THRESHOLD = 100
+BOSS_INTERMISSION_DURATION = 60.0
 POWER_UP_DROP_CHANCE = 0.12
 POWER_UP_DROP_SPEED = 92
 BOSS_TYPES = ("heavy", "fast", "battle")
+SHOT_SPEED = 470
+SHOT_SPREAD = math.pi / 4
 
 
 @dataclass(frozen=True)
@@ -48,14 +51,19 @@ class PowerUpSystem:
 
     def __init__(self):
         self._remaining: dict[str, float] = {}
+        self._permanent: set[str] = set()
 
     def collect(self, key: str) -> None:
         """Activate a catalogued effect; unknown keys fail explicitly."""
+        if key in self._permanent:
+            return
         self._remaining[key] = POWER_UPS_BY_KEY[key].duration
 
     def update(self, delta: float) -> None:
         """Advance timers and expire effects whose duration has elapsed."""
         for key in tuple(self._remaining):
+            if key in self._permanent:
+                continue
             remaining = self._remaining[key] - max(0.0, delta)
             if remaining <= 0:
                 del self._remaining[key]
@@ -64,19 +72,39 @@ class PowerUpSystem:
 
     def is_active(self, key: str) -> bool:
         """Return whether an effect is currently active."""
-        return self._remaining.get(key, 0) > 0
+        return key in self._permanent or self._remaining.get(key, 0) > 0
 
     def deactivate(self, key: str) -> None:
         """Expire an active effect immediately."""
         self._remaining.pop(key, None)
+        self._permanent.discard(key)
 
     def remaining(self, key: str) -> float:
         """Return the seconds remaining for an effect."""
+        if key in self._permanent:
+            return math.inf
         return self._remaining.get(key, 0.0)
+
+    def is_permanent(self, key: str) -> bool:
+        """Return whether an effect is permanently enabled for this run."""
+        return key in self._permanent
+
+    def toggle_permanent(self, key: str) -> bool:
+        """Toggle a catalogued effect permanently for the current run."""
+        if key not in POWER_UPS_BY_KEY:
+            raise KeyError(key)
+        if key in self._permanent:
+            self._permanent.remove(key)
+            self._remaining.pop(key, None)
+            return False
+        self._permanent.add(key)
+        self._remaining.pop(key, None)
+        return True
 
     def clear(self) -> None:
         """Clear all active effects when starting a new flight."""
         self._remaining.clear()
+        self._permanent.clear()
 
 
 @dataclass
@@ -134,6 +162,7 @@ class BossBalloon:
     target_x: float
     target_y: float
     attack_mode: str
+    entering: bool = False
 
 
 class PlaneGame:
@@ -167,7 +196,9 @@ class PlaneGame:
         self._boss: BossBalloon | None = None
         self._boss_index = 0
         self._boss_campaign_started = False
+        self._boss_intermission_remaining = 0.0
         self._game_mode = "boss_battle"
+        self.developer_mode = False
         self._score_entry_mode = ""
         self._score_initials = ""
         self.movement_scheme = "wasd"
@@ -175,13 +206,14 @@ class PlaneGame:
         self._width = 1
         self._height = 1
 
-    def start(self, mode="boss_battle"):
+    def start(self, mode="boss_battle", developer_mode=False):
         """Start a fresh game and focus keyboard input on the game canvas."""
         self._cancel_frame()
         if mode not in {"boss_battle", "endless"}:
             raise ValueError("Game mode must be 'boss_battle' or 'endless'.")
         self.state = "playing"
         self._game_mode = mode
+        self.developer_mode = bool(developer_mode)
         self.score = 0
         self.lives = 3
         self.plane_x = max(60, self.canvas.winfo_width() * 0.14)
@@ -195,6 +227,7 @@ class PlaneGame:
         self._boss = None
         self._boss_index = 0
         self._boss_campaign_started = mode == "endless"
+        self._boss_intermission_remaining = 0.0
         self.power_ups.clear()
         self._held_keys.clear()
         self._spawn_in = 0.45
@@ -214,6 +247,10 @@ class PlaneGame:
         """Handle a key press; return whether the game consumed it."""
         if self.state == "score_entry":
             self._handle_score_key(key)
+            return True
+        if key == "Escape" and self.state == "developer_menu":
+            self.state = "paused"
+            self.draw()
             return True
         normalized = self._normalize_key(key)
         if normalized is None:
@@ -269,6 +306,32 @@ class PlaneGame:
         if self.state == "game_over" and self._game_mode == "endless":
             self._begin_score_entry("endless")
 
+    def open_developer_menu(self):
+        if self.developer_mode and self.state == "paused":
+            self.state = "developer_menu"
+            self.draw()
+
+    def developer_add_score(self):
+        if self.developer_mode and self.state == "developer_menu":
+            self.score += 50
+            self.draw()
+
+    def developer_spawn_boss(self):
+        if not self.developer_mode or self.state != "developer_menu":
+            return
+        if self._boss_index >= len(BOSS_TYPES):
+            self._boss_index = 0
+        self._game_mode = "boss_battle"
+        self._boss_campaign_started = True
+        self._boss_intermission_remaining = 0.0
+        self._spawn_boss()
+        self._schedule_frame()
+
+    def developer_toggle_power_up(self, key):
+        if self.developer_mode and self.state == "developer_menu":
+            self.power_ups.toggle_permanent(key)
+            self.draw()
+
     def _begin_score_entry(self, mode):
         self._score_entry_mode = mode
         self._score_initials = ""
@@ -304,7 +367,7 @@ class PlaneGame:
 
     def continue_game(self):
         """Resume a paused game without resetting its score or lives."""
-        if self.state != "paused":
+        if self.state not in {"paused", "developer_menu"}:
             return
         self.state = "playing"
         self._last_frame = time.perf_counter()
@@ -318,7 +381,7 @@ class PlaneGame:
         self.on_exit()
 
     def _schedule_frame(self):
-        if self.state == "playing" and self._after_id is None:
+        if self.state in {"playing", "boss_entrance"} and self._after_id is None:
             self._after_id = self.root.after(16, self._tick)
 
     def _cancel_frame(self):
@@ -331,7 +394,7 @@ class PlaneGame:
 
     def _tick(self):
         self._after_id = None
-        if self.state != "playing":
+        if self.state not in {"playing", "boss_entrance"}:
             return
         now = time.perf_counter()
         delta = min(now - self._last_frame, 0.05)
@@ -345,8 +408,11 @@ class PlaneGame:
         self._height = max(self.canvas.winfo_height(), 1)
         self._world_time += delta
         self._player_hit_cooldown = max(0.0, self._player_hit_cooldown - delta)
-        self.power_ups.update(delta)
         self._cloud_offset += 38 * delta
+        if self.state == "boss_entrance":
+            self._step_boss_entrance(delta)
+            return
+        self.power_ups.update(delta)
 
         horizontal = int("d" in self._held_keys) - int("a" in self._held_keys)
         vertical = int("s" in self._held_keys) - int("w" in self._held_keys)
@@ -373,6 +439,12 @@ class PlaneGame:
                 self._boss_campaign_started = True
                 self._boss_index = 0
                 self._spawn_boss()
+            elif self._game_mode == "boss_battle" and self._boss_intermission_remaining > 0:
+                if self._boss_intermission_remaining <= delta + 1e-9:
+                    self._boss_intermission_remaining = 0.0
+                    self._spawn_boss()
+                else:
+                    self._boss_intermission_remaining -= delta
             if self._boss is None:
                 self._spawn_in -= delta
                 if self._spawn_in <= 0:
@@ -384,6 +456,10 @@ class PlaneGame:
                     self._spawn_in = random.uniform(spawn_interval * 0.9, spawn_interval * 1.1)
         else:
             self._update_boss(delta)
+
+        if self.state == "boss_entrance":
+            self._step_boss_entrance(delta)
+            return
 
         expired_balloons = []
         for balloon in self.balloons:
@@ -502,29 +578,54 @@ class PlaneGame:
 
     def _spawn_boss(self):
         kind = BOSS_TYPES[self._boss_index]
-        health = {"heavy": 12, "fast": 14, "battle": 30}[kind]
-        boss_x = self._width * 0.74
+        health = {"heavy": 12, "fast": 14, "battle": 45}[kind]
+        target_x = self._width * 0.74
         boss_y = self._height * 0.5
+        self.balloons.clear()
+        self.pickups.clear()
+        self.projectiles.clear()
+        self._held_keys.clear()
+        self.plane_x = max(60, self._width * 0.14)
+        self.plane_y = self._height * 0.5
         self._boss = BossBalloon(
-            x=boss_x,
+            x=self._width + 90,
             y=boss_y,
             radius=76 if kind == "battle" else 66,
             health=health,
             kind=kind,
             fight_time=0.0,
-            attack_in=0.8,
+            attack_in=1.2,
             mode_change_in=2.8,
             jump_in=0.0,
-            target_x=boss_x,
+            target_x=target_x,
             target_y=boss_y,
             attack_mode="heavy",
+            entering=True,
         )
+        self.state = "boss_entrance"
+
+    def _step_boss_entrance(self, delta):
+        boss = self._boss
+        if boss is None:
+            self.state = "playing"
+            return
+        entrance_speed = 250
+        distance = boss.target_x - boss.x
+        boss.x += math.copysign(min(abs(distance), entrance_speed * delta), distance)
+        if abs(boss.target_x - boss.x) < 0.5:
+            boss.x = boss.target_x
+            boss.entering = False
+            self.state = "playing"
+            self._last_shot = 0.0
+            boss.attack_in = 1.2
 
     def _update_boss(self, delta):
         boss = self._boss
         if boss is None:
             return
         boss.fight_time += delta
+        if boss.entering:
+            return
         if boss.kind in {"fast", "battle"}:
             boss.jump_in -= delta
             if boss.jump_in <= 0:
@@ -614,22 +715,22 @@ class PlaneGame:
             self.state = "boss_complete"
         else:
             self._boss_index += 1
-            self._spawn_boss()
+            self._boss_intermission_remaining = BOSS_INTERMISSION_DURATION
 
     def _fire(self):
         if self.power_ups.is_active("triple_shot"):
-            shot_offsets = (-15, 0, 15)
+            shot_angles = (0, -SHOT_SPREAD, SHOT_SPREAD)
         elif self.power_ups.is_active("double_shot"):
-            shot_offsets = (-8, 8)
+            shot_angles = (-SHOT_SPREAD, SHOT_SPREAD)
         else:
-            shot_offsets = (0,)
-        for offset in shot_offsets:
+            shot_angles = (0,)
+        for angle in shot_angles:
             self.projectiles.append(
                 Projectile(
                     self.plane_x + 21,
-                    self.plane_y + offset,
-                    470,
-                    0,
+                    self.plane_y,
+                    SHOT_SPEED * math.cos(angle),
+                    SHOT_SPEED * math.sin(angle),
                 )
             )
 
@@ -647,7 +748,8 @@ class PlaneGame:
 
     def _lose_life(self):
         if self.power_ups.is_active("extra_heart"):
-            self.power_ups.deactivate("extra_heart")
+            if not self.power_ups.is_permanent("extra_heart"):
+                self.power_ups.deactivate("extra_heart")
             return
         self.lives = max(0, self.lives - 1)
         if self.lives == 0:
@@ -679,9 +781,22 @@ class PlaneGame:
             )
         if self.state not in {"game_over", "score_entry", "score_saved"}:
             self._draw_plane()
+        if self.state == "boss_entrance":
+            boss_name = {"heavy": "HEAVY BALLOON", "fast": "FAST BALLOON", "battle": "BATTLE BALLOON"}
+            self.canvas.create_text(
+                self._width / 2, 52,
+                text=f"{boss_name[self._boss.kind]} APPROACHING",
+                fill="#354356",
+                font=("Courier New", 12, "bold"),
+            )
         if self.state == "paused":
-            self._draw_overlay("PAUSED", "Take a breather, pilot.", [("CONTINUE", self.continue_game, "#b9e3c9"),
-                                                                        ("EXIT TO MAIN MENU", self.exit_to_menu, "#f2c5d4")])
+            buttons = [("CONTINUE", self.continue_game, "#b9e3c9")]
+            if self.developer_mode:
+                buttons.append(("DEVELOPER TOOLS", self.open_developer_menu, "#d4e8fa"))
+            buttons.append(("EXIT TO MAIN MENU", self.exit_to_menu, "#f2c5d4"))
+            self._draw_overlay("PAUSED", "Take a breather, pilot.", buttons)
+        elif self.state == "developer_menu":
+            self._draw_developer_menu()
         elif self.state == "game_over":
             buttons = [("FLY AGAIN", lambda: self.start(self._game_mode), "#b9e3c9")]
             if self._game_mode == "endless":
@@ -708,6 +823,45 @@ class PlaneGame:
                 f"{self._score_initials}  {self.score}",
                 [("EXIT TO MAIN MENU", self.exit_to_menu, "#b9e3c9")],
             )
+
+    def _draw_developer_menu(self):
+        self.canvas.create_rectangle(0, 0, self._width, self._height, fill="#273d56", stipple="gray50", outline="")
+        center_x, center_y = self._width / 2, self._height / 2
+        panel_width, panel_height = min(650, self._width - 36), min(474, self._height - 32)
+        left, top = center_x - panel_width / 2, center_y - panel_height / 2
+        self.canvas.create_rectangle(left, top, left + panel_width, top + panel_height,
+                                     fill="#f7f5e9", outline="#ffffff", width=3)
+        self.canvas.create_text(center_x, top + 34, text="DEVELOPER TOOLS", fill="#354356",
+                                font=("Courier New", 17, "bold"))
+        self.canvas.create_text(center_x, top + 62, text=f"RUN SCORE: {self.score}",
+                                fill="#637c91", font=("Courier New", 10, "bold"))
+        button_width = min(270, (panel_width - 50) / 2)
+        first_y = top + 88
+        options = [
+            ("ADD 50 SCORE", self.developer_add_score, "#b9e3c9"),
+            ("SPAWN NEXT BOSS", self.developer_spawn_boss, "#f2c5d4"),
+        ]
+        options.extend(
+            (
+                f"{'ON' if self.power_ups.is_permanent(power_up.key) else 'OFF'}  {power_up.name.upper()}",
+                lambda key=power_up.key: self.developer_toggle_power_up(key),
+                power_up.color,
+            )
+            for power_up in POWER_UP_CATALOG
+        )
+        options.extend((
+            ("RESUME GAME", self.continue_game, "#d4e8fa"),
+            ("BACK TO PAUSE", self._return_to_pause, "#e4d8f5"),
+        ))
+        for index, (label, action, color) in enumerate(options):
+            row, column = divmod(index, 2)
+            x = center_x + (column * 2 - 1) * (button_width / 2 + 12)
+            button_tag = f"dev-action-{index}"
+            self._draw_overlay_button(x, first_y + row * 50, label, action, color, button_tag, button_width, 38)
+
+    def _return_to_pause(self):
+        self.state = "paused"
+        self.draw()
 
     def _cancel_score_entry(self):
         self.state = "game_over" if self._score_entry_mode == "endless" else "boss_complete"
@@ -767,7 +921,8 @@ class PlaneGame:
             self.canvas.create_text(self._width - 22, 43, anchor="ne", text="♥ BONUS", fill="#278bd0",
                                     font=("Courier New", 10, "bold"))
         active_effects = [
-            f"{power_up.name.upper()} {self.power_ups.remaining(power_up.key):.0f}s"
+            f"{power_up.name.upper()} "
+            f"{'∞' if self.power_ups.is_permanent(power_up.key) else f'{self.power_ups.remaining(power_up.key):.0f}s'}"
             for power_up in POWER_UP_CATALOG
             if self.power_ups.is_active(power_up.key)
         ]
@@ -779,6 +934,13 @@ class PlaneGame:
                 text="  |  ".join(active_effects),
                 fill="#354356",
                 font=("Courier New", 9, "bold"),
+            )
+        if self._game_mode == "boss_battle" and self._boss is None and self._boss_intermission_remaining > 0:
+            next_boss = BOSS_TYPES[self._boss_index].upper()
+            self.canvas.create_text(
+                self._width / 2, 20, anchor="n",
+                text=f"{next_boss} IN {math.ceil(self._boss_intermission_remaining)}s",
+                fill="#354356", font=("Courier New", 10, "bold"),
             )
         self.canvas.create_text(
             self._width - 14,
@@ -835,7 +997,7 @@ class PlaneGame:
         self.canvas.create_rectangle(
             bar_left,
             bar_top,
-            bar_left + bar_width * boss.health / {"heavy": 12, "fast": 14, "battle": 30}[boss.kind],
+            bar_left + bar_width * boss.health / {"heavy": 12, "fast": 14, "battle": 45}[boss.kind],
             bar_top + 7,
             fill="#a67dc9",
             outline="",
@@ -907,7 +1069,11 @@ class PlaneGame:
         if self.power_ups.is_active("rapid_fire"):
             block(x - 21, y, 5, 8, "#f5d76e")
         if self.power_ups.is_active("extra_heart"):
-            self.canvas.create_text(x, y - 25, text="♥", fill="#278bd0", font=("Courier New", 14, "bold"))
+            self.canvas.create_text(
+                x, y - 25, text="♥",
+                fill="#278bd0",
+                font=("Courier New", 14, "bold"),
+            )
 
     def _draw_overlay(self, title, subtitle, buttons):
         self.canvas.create_rectangle(
@@ -945,9 +1111,9 @@ class PlaneGame:
         for index, (label, action, color) in enumerate(buttons):
             self._draw_overlay_button(center_x, first_button_y + index * 52, label, action, color)
 
-    def _draw_overlay_button(self, center_x, top, label, action, color):
-        width, height = min(250, self._width - 72), 42
-        tag = f"game-action-{label.lower().replace(' ', '-')}"
+    def _draw_overlay_button(self, center_x, top, label, action, color, tag=None, width=None, height=42):
+        width = width or min(250, self._width - 72)
+        tag = tag or f"game-action-{label.lower().replace(' ', '-')}"
         self.canvas.create_rectangle(center_x - width / 2 + 3, top + 3, center_x + width / 2 + 3, top + height + 3, fill="#71808c", outline="")
         self.canvas.create_rectangle(
             center_x - width / 2,

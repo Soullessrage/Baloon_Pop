@@ -26,26 +26,34 @@ plane costs one of your three lives. Press **Escape** to pause. Continue resumes
 the flight; Exit returns to the main menu. After game over, Fly Again starts a
 fresh game. Endless mode also offers the option to submit a high score.
 
-Balloon spawns become more frequent over time. At 150 popped balloons the boss
-campaign begins: defeat the Heavy Balloon, Fast Balloon, and final Battle
-Balloon in sequence. Heavy bosses fire large balloons
-that take two hits to pop. Fast bosses jolt around and release balloons that
-chase the plane; the final boss mixes both attack styles. Bosses award a score
-bonus that decreases by one point per second (10 per second for the final boss),
-with a minimum of 10 points.
+Balloon spawns become more frequent over time. At 100 popped balloons the boss
+campaign begins. Defeat the Heavy Balloon, play for another minute, then defeat
+the Fast Balloon and play for a minute before the final Battle Balloon. A
+cutscene clears the screen, moves the plane to the left-center, and slides each
+boss in from the right; play and damage are disabled until the entrance ends.
+Heavy bosses fire large balloons that take two hits to pop. Fast bosses jolt
+around and release balloons that chase the plane; the final boss mixes both
+attack styles and has 45 health. Bosses award a score bonus that decreases by
+one point per second (10 per second for the final boss), with a minimum of 10
+points.
 Defeating the final boss lets you save a boss-campaign high score or continue in
 endless mode.
 
 Popped balloons have a chance to drop one of five timed power-ups: Double Shot,
-Triple Shot, Faster Shooting, Extra Heart, or Plane Speed Up. Collect drops by
-flying into them. Active effects are shown along the bottom of the screen and
-also change the plane's appearance. The Extra Heart is blue and absorbs one hit
-while its timer is active. Endless-mode scores can be entered after game over.
-Both modes keep separate top-ten arcade records with three-letter initials.
+Triple Shot, Faster Shooting, Extra Heart, or Plane Speed Up. Double and Triple
+Shot fire diagonal V-patterns; Triple Shot also fires a straight center shot.
+Collect drops by flying into them. Active effects are shown along the bottom of
+the screen and also change the plane's appearance. The Extra Heart is blue and
+absorbs one hit while its timer is active. Endless-mode scores can be entered
+after game over. Both modes keep separate top-ten arcade records with
+three-letter initials.
 
 Open **Controls** from the main screen to switch movement between WASD and the
 arrow keys. Settings, controls, the flight guide, records, and contact details
 are shown within the main screen, with a short screen transition between pages.
+Hold **Shift** while clicking **Boss Campaign** to enable developer mode for
+that run. Press **Escape** to pause and open Developer Tools to add 50 score,
+spawn the next boss, or toggle permanent power-ups for the run.
 
 ## Configure
 
