@@ -19,12 +19,20 @@ command prompt that requires typing commands. You can also run
 
 ## Play
 
-Select **Play** from the menu. Steer the plane with **W**, **A**, **S**, and
-**D**; press **Space** to fire to the right. Pop
-balloons to score. A balloon that escapes the left edge or collides with the
-plane costs one of your three lives. Press **Escape** to pause. Continue resumes
-the flight; Exit returns to the main menu. After game over, Fly Again starts a
-fresh game. Endless mode also offers the option to submit a high score.
+Select **Boss Campaign** from the menu. Steer the plane with **W**, **A**, **S**,
+and **D** (or the arrow keys); the plane fires automatically. Pop balloons to
+score and charge the blue special meter. Press **Space** when it is full to
+clear all on-screen balloons except bosses. The health bar starts at three;
+missed or colliding balloons cost one health. A balloon that escapes the left
+edge or collides with the plane costs one health, except target balloons are
+safe to fly through. Press **Escape** to pause. Continue resumes the flight;
+Exit returns to the main menu. After game over, Fly Again starts a fresh game.
+Endless mode also offers the option to submit a high score.
+
+Metal balloons have visible armor plates and take three shots. Wiggly balloons
+have animal faces and smoothly drift up and down. Target balloons do not hurt
+the plane on contact; shoot them to pop them. The book in the main menu lists
+the balloon types, power-ups, bosses, and controls.
 
 Each run opens with a short General B. briefing, shown in a typewriter-style
 dialogue box as the plane flies in. Boss introductions use the same cutscene,
@@ -45,14 +53,14 @@ points.
 Defeating the final boss lets you save a boss-campaign high score or continue in
 endless mode.
 
-Popped balloons have a chance to drop one of five timed power-ups: Double Shot,
-Triple Shot, Faster Shooting, Extra Heart, or Plane Speed Up. Double and Triple
-Shot fire diagonal V-patterns; Triple Shot also fires a straight center shot.
-Collect drops by flying into them. Active effects are shown along the bottom of
-the screen and also change the plane's appearance. The Extra Heart is blue and
-absorbs one hit while its timer is active. Endless-mode scores can be entered
-after game over. Both modes keep separate top-ten arcade records with
-three-letter initials.
+Popped balloons have a chance to drop power-ups. Double Shot, Triple Shot,
+Faster Shooting, and Plane Speed Up are timed effects. Double and Triple Shot
+fire diagonal V-patterns; Triple Shot also fires a straight center shot. The
+Heart pickup permanently heals one health, including above the starting maximum,
+so extra health acts as a shield. Collect drops by flying into them. Active
+timed effects are shown along the bottom of the screen and also change the
+plane's appearance. Endless-mode scores can be entered after game over. Both
+modes keep separate top-ten arcade records with three-letter initials.
 
 Open **Controls** from the main screen to switch movement between WASD and the
 arrow keys. Settings, controls, the flight guide, records, and contact details

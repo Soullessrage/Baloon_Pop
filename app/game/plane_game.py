@@ -15,7 +15,7 @@ SHOT_INTERVAL = 0.22
 REGULAR_SPAWN_START = 1.5
 REGULAR_SPAWN_MIN = 0.72
 REGULAR_SPAWN_RAMP = 0.006
-GAME_VERSION = "VER. 0.3"
+GAME_VERSION = "VER. 0.4"
 BOSS_SCORE_THRESHOLD = 100
 BOSS_INTERMISSION_DURATION = 60.0
 POWER_UP_DROP_CHANCE = 0.12
@@ -23,16 +23,19 @@ POWER_UP_DROP_SPEED = 92
 BOSS_TYPES = ("heavy", "fast", "battle")
 SHOT_SPEED = 470
 SHOT_SPREAD = math.pi / 6
+STARTING_HEALTH = 3
+SPECIAL_CHARGE_MAX = 100
+SPECIAL_CHARGE_PER_BALLOON = 10
 
 
 @dataclass(frozen=True)
 class PowerUpDefinition:
-    """Describe a timed effect available to the game and reference book."""
+    """Describe an effect available to the game and reference book."""
 
     key: str
     name: str
     description: str
-    duration: float
+    duration: float | None
     color: str
 
 
@@ -40,10 +43,11 @@ POWER_UP_CATALOG = (
     PowerUpDefinition("double_shot", "Double Shot", "Fire two shots at once.", 8.0, "#c5a3e8"),
     PowerUpDefinition("triple_shot", "Triple Shot", "Fire three shots at once.", 8.0, "#f3ad7b"),
     PowerUpDefinition("rapid_fire", "Faster Shooting", "Fire shots more frequently.", 8.0, "#f5d76e"),
-    PowerUpDefinition("extra_heart", "Extra Heart", "Gain a temporary bonus life.", 8.0, "#82c9e8"),
+    PowerUpDefinition("extra_heart", "Heart", "Permanently heal 1 health; can build an overheal shield.", None, "#82c9e8"),
     PowerUpDefinition("speed_boost", "Plane Speed Up", "Fly faster for a short time.", 8.0, "#a8dba8"),
 )
 POWER_UPS_BY_KEY = {power_up.key: power_up for power_up in POWER_UP_CATALOG}
+TIMED_POWER_UPS = tuple(power_up for power_up in POWER_UP_CATALOG if power_up.duration is not None)
 
 
 class PowerUpSystem:
@@ -57,7 +61,10 @@ class PowerUpSystem:
         """Activate a catalogued effect; unknown keys fail explicitly."""
         if key in self._permanent:
             return
-        self._remaining[key] = POWER_UPS_BY_KEY[key].duration
+        duration = POWER_UPS_BY_KEY[key].duration
+        if duration is None:
+            raise ValueError(f"{key!r} is not a timed power-up.")
+        self._remaining[key] = duration
 
     def update(self, delta: float) -> None:
         """Advance timers and expire effects whose duration has elapsed."""
@@ -91,7 +98,7 @@ class PowerUpSystem:
 
     def toggle_permanent(self, key: str) -> bool:
         """Toggle a catalogued effect permanently for the current run."""
-        if key not in POWER_UPS_BY_KEY:
+        if key not in POWER_UPS_BY_KEY or POWER_UPS_BY_KEY[key].duration is None:
             raise KeyError(key)
         if key in self._permanent:
             self._permanent.remove(key)
@@ -124,6 +131,11 @@ class Balloon:
     velocity_x: float | None = None
     velocity_y: float = 0.0
     remaining_life: float | None = None
+    kind: str = "normal"
+    wiggle_center_y: float | None = None
+    wiggle_phase: float = 0.0
+    wiggle_speed: float = 0.0
+    wiggle_amplitude: float = 0.0
 
 
 @dataclass
@@ -225,7 +237,9 @@ class PlaneGame:
         self._game_mode = mode
         self.developer_mode = bool(developer_mode)
         self.score = 0
-        self.lives = 3
+        self.health = STARTING_HEALTH
+        self.max_health = STARTING_HEALTH
+        self.special_charge = 0
         self.plane_x = max(60, self.canvas.winfo_width() * 0.14)
         self.plane_y = self.canvas.winfo_height() * 0.5
         self.balloons: list[Balloon] = []
@@ -280,13 +294,16 @@ class PlaneGame:
             return True
         if self.state != "playing":
             return normalized in {"w", "a", "s", "d", "space"}
-        if normalized in {"w", "a", "s", "d", "space"}:
+        if normalized == "space":
+            self._activate_special()
+            return True
+        if normalized in {"w", "a", "s", "d"}:
             self._held_keys.add(normalized)
             return True
         return False
 
     def handle_keyrelease(self, key):
-        """Stop continuous movement or shooting when the key is released."""
+        """Stop continuous movement when a movement key is released."""
         normalized = self._normalize_key(key)
         if normalized is None:
             return False
@@ -301,8 +318,20 @@ class PlaneGame:
         self._held_keys.clear()
 
     def collect_power_up(self, key):
-        """Activate a catalogued effect."""
-        self.power_ups.collect(key)
+        """Apply an instant heal or activate a timed effect."""
+        if key == "extra_heart":
+            self.health += 1
+            self.max_health += 1
+        else:
+            self.power_ups.collect(key)
+
+    def _activate_special(self):
+        if self.special_charge < SPECIAL_CHARGE_MAX:
+            return False
+        self.special_charge = 0
+        self.balloons.clear()
+        self.draw()
+        return True
 
     def start_endless(self):
         """Continue a completed boss campaign in endless mode."""
@@ -498,7 +527,7 @@ class PlaneGame:
         self.plane_y = max(74, min(self._height - 42, self.plane_y))
 
         self._last_shot -= delta
-        if "space" in self._held_keys and self._last_shot <= 0:
+        if self._last_shot <= 0:
             self._fire()
             self._last_shot = SHOT_INTERVAL * (0.45 if self.power_ups.is_active("rapid_fire") else 1.0)
 
@@ -548,6 +577,14 @@ class PlaneGame:
             if balloon.velocity_x is not None:
                 balloon.x += balloon.velocity_x * delta
                 balloon.y += balloon.velocity_y * delta
+            elif balloon.kind == "wiggly":
+                balloon.x -= balloon.speed * delta
+                balloon.wiggle_phase += balloon.wiggle_speed * delta
+                center_y = balloon.wiggle_center_y if balloon.wiggle_center_y is not None else balloon.y
+                balloon.y = max(
+                    56,
+                    min(self._height - 44, center_y + math.sin(balloon.wiggle_phase) * balloon.wiggle_amplitude),
+                )
             else:
                 balloon.x -= balloon.speed * delta
                 balloon.y = max(56, min(self._height - 44, balloon.y + balloon.drift * delta))
@@ -589,6 +626,8 @@ class PlaneGame:
 
         player_radius = 14
         for balloon in tuple(self.balloons):
+            if balloon.kind == "target":
+                continue
             if math.hypot(balloon.x - self.plane_x, balloon.y - self.plane_y) < balloon.radius + player_radius:
                 self.balloons.remove(balloon)
                 self._take_hit()
@@ -623,6 +662,10 @@ class PlaneGame:
                 hit_balloon.health -= 1
                 if hit_balloon.health <= 0:
                     self.balloons.remove(hit_balloon)
+                    self.special_charge = min(
+                        SPECIAL_CHARGE_MAX,
+                        self.special_charge + SPECIAL_CHARGE_PER_BALLOON,
+                    )
                     if not hit_balloon.hostile:
                         self._record_balloon_popped(hit_balloon.x, hit_balloon.y)
                 continue
@@ -802,24 +845,33 @@ class PlaneGame:
             )
 
     def _spawn_balloon(self):
+        kind = random.choices(
+            ("normal", "metal", "wiggly", "target"),
+            weights=(0.50, 0.18, 0.20, 0.12),
+            k=1,
+        )[0]
+        radius = random.uniform(14, 21)
+        y = random.uniform(82, max(83, self._height - 58))
         self.balloons.append(
             Balloon(
                 x=self._width + 24,
-                y=random.uniform(82, max(83, self._height - 58)),
-                radius=random.uniform(14, 21),
+                y=y,
+                radius=radius,
                 speed=random.uniform(100, 155),
                 drift=random.uniform(-18, 18),
-                color=random.choice(PASTEL_BALLOON_COLORS),
+                color="#778a99" if kind == "metal" else random.choice(PASTEL_BALLOON_COLORS),
+                health=3 if kind == "metal" else 1,
+                kind=kind,
+                wiggle_center_y=y if kind == "wiggly" else None,
+                wiggle_phase=random.uniform(0, math.tau),
+                wiggle_speed=random.uniform(1.3, 2.4),
+                wiggle_amplitude=random.uniform(14, 30),
             )
         )
 
     def _lose_life(self):
-        if self.power_ups.is_active("extra_heart"):
-            if not self.power_ups.is_permanent("extra_heart"):
-                self.power_ups.deactivate("extra_heart")
-            return
-        self.lives = max(0, self.lives - 1)
-        if self.lives == 0:
+        self.health = max(0, self.health - 1)
+        if self.health == 0:
             self.state = "game_over"
             self._held_keys.clear()
             self._cancel_frame()
@@ -908,7 +960,7 @@ class PlaneGame:
                 lambda key=power_up.key: self.developer_toggle_power_up(key),
                 power_up.color,
             )
-            for power_up in POWER_UP_CATALOG
+            for power_up in TIMED_POWER_UPS
         )
         options.extend((
             ("RESUME GAME", self.continue_game, "#d4e8fa"),
@@ -1039,20 +1091,59 @@ class PlaneGame:
             font=("Courier New", 13, "bold"),
         )
         self.canvas.create_text(
-            self._width - 24,
-            20,
-            anchor="ne",
-            text=f"LIVES  {'♥ ' * self.lives}",
-            fill="#d96787",
-            font=("Courier New", 13, "bold"),
+            24,
+            43,
+            anchor="nw",
+            text=f"HEALTH  {self.health}/{self.max_health}"
+                 + (f"  SHIELD +{self.health - STARTING_HEALTH}" if self.health > STARTING_HEALTH else ""),
+            fill="#354356",
+            font=("Courier New", 9, "bold"),
         )
-        if self.power_ups.is_active("extra_heart"):
-            self.canvas.create_text(self._width - 22, 43, anchor="ne", text="♥ BONUS", fill="#278bd0",
-                                    font=("Courier New", 10, "bold"))
+        health_width = max(0, min(180, self._width - 48))
+        health_top = 59
+        self.canvas.create_rectangle(
+            24, health_top, 24 + health_width, health_top + 10,
+            fill="#e5e9ec", outline="#ffffff",
+        )
+        health_fill = health_width * self.health / self.max_health
+        base_fill = health_width * min(self.health, STARTING_HEALTH) / self.max_health
+        if base_fill > 0:
+            self.canvas.create_rectangle(
+                24, health_top, 24 + base_fill, health_top + 10,
+                fill="#7cc99a", outline="",
+            )
+        if health_fill > base_fill:
+            self.canvas.create_rectangle(
+                24 + base_fill, health_top, 24 + health_fill, health_top + 10,
+                fill="#5baee8", outline="",
+            )
+        self.canvas.create_text(
+            24,
+            77,
+            anchor="nw",
+            text=f"SPECIAL  {self.special_charge}% - SPACE"
+                 + ("  READY!" if self.special_charge >= SPECIAL_CHARGE_MAX else ""),
+            fill="#354356",
+            font=("Courier New", 9, "bold"),
+        )
+        special_width = max(0, min(180, self._width - 48))
+        special_top = 93
+        self.canvas.create_rectangle(
+            24, special_top,
+            24 + special_width, special_top + 10,
+            fill="#e5e9ec", outline="#ffffff",
+        )
+        if self.special_charge > 0:
+            self.canvas.create_rectangle(
+                24, special_top,
+                24 + special_width * self.special_charge / SPECIAL_CHARGE_MAX,
+                special_top + 10,
+                fill="#438fe0", outline="",
+            )
         active_effects = [
             f"{power_up.name.upper()} "
             f"{'∞' if self.power_ups.is_permanent(power_up.key) else f'{self.power_ups.remaining(power_up.key):.0f}s'}"
-            for power_up in POWER_UP_CATALOG
+            for power_up in TIMED_POWER_UPS
             if self.power_ups.is_active(power_up.key)
         ]
         if active_effects:
@@ -1142,7 +1233,49 @@ class PlaneGame:
             fill=balloon.color,
             outline="",
         )
-        self.canvas.create_oval(x - radius, y - radius, x + radius, y + radius, fill=balloon.color, outline="#ffffff", width=2)
+        if balloon.kind == "wiggly":
+            self.canvas.create_polygon(
+                x - radius * 0.62, y - radius * 0.5,
+                x - radius * 0.88, y - radius * 1.42,
+                x - radius * 0.17, y - radius * 0.88,
+                fill=balloon.color, outline="#ffffff", width=2,
+            )
+            self.canvas.create_polygon(
+                x + radius * 0.62, y - radius * 0.5,
+                x + radius * 0.88, y - radius * 1.42,
+                x + radius * 0.17, y - radius * 0.88,
+                fill=balloon.color, outline="#ffffff", width=2,
+            )
+            self.canvas.create_oval(
+                x - radius * 0.78, y - radius * 0.85,
+                x + radius * 0.78, y + radius * 0.85,
+                fill=balloon.color, outline="#ffffff", width=2,
+            )
+            self.canvas.create_oval(
+                x - radius * 0.38, y + radius * 0.15,
+                x + radius * 0.38, y + radius * 0.58,
+                fill="#fff2df", outline="",
+            )
+            self.canvas.create_oval(
+                x - radius * 0.34, y - radius * 0.24,
+                x - radius * 0.19, y - radius * 0.09,
+                fill="#354356", outline="",
+            )
+            self.canvas.create_oval(
+                x + radius * 0.19, y - radius * 0.24,
+                x + radius * 0.34, y - radius * 0.09,
+                fill="#354356", outline="",
+            )
+            self.canvas.create_oval(
+                x - radius * 0.09, y + radius * 0.27,
+                x + radius * 0.09, y + radius * 0.43,
+                fill="#e9879d", outline="",
+            )
+        else:
+            self.canvas.create_oval(
+                x - radius, y - radius, x + radius, y + radius,
+                fill=balloon.color, outline="#ffffff", width=2,
+            )
         self.canvas.create_oval(
             x - radius * 0.48,
             y - radius * 0.56,
@@ -1151,8 +1284,49 @@ class PlaneGame:
             fill="#fff9f7",
             outline="",
         )
+        if balloon.kind == "metal":
+            self.canvas.create_polygon(
+                x - radius * 0.78, y - radius * 0.12,
+                x - radius * 0.58, y - radius * 0.62,
+                x + radius * 0.58, y - radius * 0.62,
+                x + radius * 0.78, y - radius * 0.12,
+                x + radius * 0.58, y + radius * 0.04,
+                x - radius * 0.58, y + radius * 0.04,
+                fill="#bac5ce", outline="#eef3f6", width=1,
+            )
+            self.canvas.create_polygon(
+                x - radius * 0.72, y + radius * 0.15,
+                x - radius * 0.52, y + radius * 0.57,
+                x + radius * 0.52, y + radius * 0.57,
+                x + radius * 0.72, y + radius * 0.15,
+                fill="#8f9eaa", outline="#dbe3e9", width=1,
+            )
+            for rivet_x, rivet_y in (
+                (x - radius * 0.48, y - radius * 0.38),
+                (x + radius * 0.48, y - radius * 0.38),
+                (x - radius * 0.42, y + radius * 0.34),
+                (x + radius * 0.42, y + radius * 0.34),
+            ):
+                self.canvas.create_oval(
+                    rivet_x - 1.5, rivet_y - 1.5, rivet_x + 1.5, rivet_y + 1.5,
+                    fill="#f3f6f8", outline="#52616d",
+                )
+        elif balloon.kind == "target":
+            for scale, color in ((0.72, "#ffffff"), (0.48, "#e65d64"), (0.24, "#ffffff")):
+                self.canvas.create_oval(
+                    x - radius * scale, y - radius * scale,
+                    x + radius * scale, y + radius * scale,
+                    outline=color, width=2,
+                )
+            self.canvas.create_oval(
+                x - radius * 0.11, y - radius * 0.11,
+                x + radius * 0.11, y + radius * 0.11,
+                fill="#e65d64", outline="",
+            )
         if balloon.indestructible:
             self.canvas.create_text(x, y, text="X", fill="#ffffff", font=("Courier New", 11, "bold"))
+        elif balloon.kind == "metal":
+            self.canvas.create_text(x, y, text=str(balloon.health), fill="#ffffff", font=("Courier New", 9, "bold"))
         elif balloon.hostile and balloon.health > 1:
             self.canvas.create_text(x, y, text=str(balloon.health), fill="#ffffff", font=("Courier New", 9, "bold"))
 
@@ -1197,12 +1371,6 @@ class PlaneGame:
                 block(x + 22, y + offset, 5, 4, "#f3ad7b")
         if self.power_ups.is_active("rapid_fire"):
             block(x - 21, y, 5, 8, "#f5d76e")
-        if self.power_ups.is_active("extra_heart"):
-            self.canvas.create_text(
-                x, y - 25, text="♥",
-                fill="#278bd0",
-                font=("Courier New", 14, "bold"),
-            )
 
     def _draw_overlay(self, title, subtitle, buttons):
         self.canvas.create_rectangle(

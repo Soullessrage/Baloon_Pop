@@ -178,25 +178,64 @@ class MainWindow:
 
     def _draw_guide_page(self, width, height):
         x, y = max(42, width * 0.12), 145
+        text_width = width - 2 * x
+        self.canvas.create_text(
+            x, y, anchor="nw", text="HOW TO PLAY",
+            fill="#354356", font=("Courier New", 9, "bold"),
+        )
+        y += 18
+        self.canvas.create_text(
+            x, y, anchor="nw", width=text_width,
+            text="Fly with WASD or the arrow keys. Shooting is automatic. Space clears all "
+                 "non-boss balloons when the blue special bar is full.",
+            fill="#354356", font=("Courier New", 8),
+        )
+        y += 34
+        self.canvas.create_text(
+            x, y, anchor="nw", text="BALLOON TYPES",
+            fill="#354356", font=("Courier New", 9, "bold"),
+        )
+        y += 18
+        for description in (
+            "Metal: armored plates; takes 3 hits.",
+            "Wiggly: animal-shaped and smoothly drifts up and down.",
+            "Target: safe to fly through; shoot it to pop it.",
+        ):
+            self.canvas.create_text(x, y, anchor="nw", text=description,
+                                    fill="#354356", font=("Courier New", 8))
+            y += 18
+        y += 3
+        self.canvas.create_text(
+            x, y, anchor="nw", text="POWER-UPS",
+            fill="#354356", font=("Courier New", 9, "bold"),
+        )
+        y += 18
         for power_up in POWER_UP_CATALOG:
-            self.canvas.create_oval(x, y - 8, x + 16, y + 8, fill=power_up.color, outline="#ffffff", width=2)
-            self.canvas.create_text(x + 31, y, anchor="w",
-                                    text=f"{power_up.name}  -  {power_up.description} ({power_up.duration:g}s)",
-                                    fill="#354356", font=("Courier New", 9))
-            y += 34
-        y += 12
+            self.canvas.create_oval(x, y - 6, x + 12, y + 6, fill=power_up.color, outline="#ffffff", width=2)
+            duration = f" ({power_up.duration:g}s)" if power_up.duration is not None else " (permanent)"
+            self.canvas.create_text(x + 24, y, anchor="w",
+                                    text=f"{power_up.name} - {power_up.description}{duration}",
+                                    fill="#354356", font=("Courier New", 8))
+            y += 17
+        y += 3
+        self.canvas.create_text(
+            x, y, anchor="nw", text="BOSSES",
+            fill="#354356", font=("Courier New", 9, "bold"),
+        )
+        y += 18
         boss_descriptions = (
-            "Heavy Balloon: fires large, two-hit balloons that can be dodged or shot.",
-            "Fast Balloon: jolts around and releases balloons that chase the plane.",
-            "Battle Balloon: combines the other bosses' attacks. Defeat it to unlock endless.",
+            "Heavy: fires large, two-hit balloons. Fast: jolts around and sends homing balloons.",
+            "Battle: combines both attacks. Defeat it to unlock endless mode.",
         )
         for index, description in enumerate(boss_descriptions):
-            self.canvas.create_text(x, y, anchor="w", width=width - 2 * x,
-                                    text=description, fill="#354356", font=("Courier New", 9))
-            y += 36
-        self.canvas.create_text(x, y + 4, anchor="w", width=width - 2 * x,
-                                text="Pop balloons for a chance to drop a power-up. Boss score falls with fight time.",
-                                fill="#607386", font=("Courier New", 9))
+            self.canvas.create_text(x, y, anchor="nw", width=text_width,
+                                    text=description, fill="#354356", font=("Courier New", 8))
+            y += 19
+        self.canvas.create_text(
+            x, y, anchor="nw", width=text_width,
+            text="Popped balloons may drop power-ups. Boss score bonuses fall with fight time.",
+            fill="#607386", font=("Courier New", 8),
+        )
         self._add_page_button(width / 2 - 130, height - 82, 200, 44, "ARCADE RECORDS", "#d4e8fa",
                               lambda: self._navigate("scores"), "records")
         self._add_page_button(width / 2 + 130, height - 82, 200, 44, "BACK TO MENU", "#f2c5d4",
